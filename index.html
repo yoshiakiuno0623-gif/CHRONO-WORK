@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <title>CHRONO WORK</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -156,6 +157,9 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
 .lr-err{font-size:10px;color:#F87171;width:100%;padding-left:48px;margin-top:-4px;margin-bottom:2px;display:none}
 .lr-err.show{display:block}
 /* 削除 */
+.lr-actions{display:flex;align-items:center;gap:2px;flex-shrink:0}
+.lr-replay{background:none;border:1px solid rgba(100,116,139,.2);border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--slate-dim);font-size:9px;transition:all .15s;padding:0;flex-shrink:0}
+.lr-replay:hover{border-color:var(--amber);color:var(--amber);background:var(--amber-lo)}
 .lr-del{background:none;border:none;color:#1e2d45;cursor:pointer;font-size:12px;padding:4px 6px;transition:color .15s;line-height:1;flex-shrink:0}
 .lr-del:hover{color:var(--red)}
 /* alllog用（CSV画面）は従来スタイルを維持 */
@@ -434,6 +438,216 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
 </div>
 
 <script>
+// ════════════════════════════════════════════════
+//  ▼▼▼ Supabase設定: 自分のURLとKEYを貼り付ける ▼▼▼
+// ════════════════════════════════════════════════
+const SUPABASE_URL = 'https://hnsgmfxupmzyiefchtmb.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imhuc2dtZnh1cG16eWllZmNodG1iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwNjQ5ODIsImV4cCI6MjA5MTY0MDk4Mn0.uwdGwXcKtWbpScNLONhUr8BOz-6uE-amQlOycQX_6Vc';
+// ════════════════════════════════════════════════
+
+// Supabaseが設定されているかチェック
+const SB_ENABLED = !!(SUPABASE_URL && SUPABASE_KEY);
+let SB = null;
+let SB_USER = null;
+
+if(SB_ENABLED){
+  // sb_publishable_ 形式・eyJhbGci 形式どちらも supabase-js v2 で動作します
+  SB = supabase.createClient(SUPABASE_URL.trim(), SUPABASE_KEY.trim());
+}
+
+// ── 認証ユーティリティ ──
+async function sbSignIn(email, pass){
+  const {error} = await SB.auth.signInWithPassword({email,password:pass});
+  return error;
+}
+async function sbSignUp(email, pass){
+  const {error} = await SB.auth.signUp({email,password:pass});
+  return error;
+}
+async function sbSignInGoogle(){
+  const {error} = await SB.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.href}});
+  return error;
+}
+async function sbSignOut(){
+  await SB.auth.signOut();
+  SB_USER=null;
+  location.reload();
+}
+
+// ── Supabase からデータ読み込み ──
+async function sbLoad(){
+  if(!SB||!SB_USER)return false;
+  try{
+    const uid=SB_USER.id;
+    const [tr,gr,pr]= await Promise.all([
+      SB.from('tasks').select('*').eq('user_id',uid).order('start_date',{ascending:false}),
+      SB.from('genres').select('*').eq('user_id',uid).order('sort_order'),
+      SB.from('presets').select('*').eq('user_id',uid).order('sort_order'),
+    ]);
+    if(tr.error||gr.error||pr.error){console.error('sbLoad error',tr.error,gr.error,pr.error);return false;}
+    // DBレコード → アプリ形式に変換
+    if(tr.data.length>0){
+      tasks=tr.data.map(r=>({
+        id:r.id, presetId:r.preset_id, name:r.name, genre:r.genre,
+        startDate:r.start_date, endDate:r.end_date, duration:r.duration,
+        startTime:new Date(r.start_date).getTime(),
+        endTime:r.end_date?new Date(r.end_date).getTime():null,
+      }));
+    }
+    if(gr.data.length>0){
+      genres=gr.data.map(r=>({id:r.id,label:r.label,color:r.color}));
+    }
+    if(pr.data.length>0){
+      presets=pr.data.map(r=>({id:r.id,name:r.name,genre:r.genre}));
+    }
+    // localStorageにもキャッシュ
+    try{
+      localStorage.setItem(LS_T,JSON.stringify(tasks));
+      localStorage.setItem(LS_G,JSON.stringify(genres));
+      localStorage.setItem(LS_P,JSON.stringify(presets));
+    }catch(e){}
+    return true;
+  }catch(e){console.error('sbLoad exception',e);return false;}
+}
+
+// ── Supabase へ保存（upsert） ──
+async function sbSave(){
+  if(!SB||!SB_USER)return;
+  const uid=SB_USER.id;
+  try{
+    // tasks
+    const tRows=tasks.map((t,i)=>({
+      id:t.id, user_id:uid, preset_id:t.presetId||null, name:t.name, genre:t.genre,
+      start_date:t.startDate, end_date:t.endDate||null, duration:t.duration,
+    }));
+    // genres
+    const gRows=genres.map((g,i)=>({id:g.id,user_id:uid,label:g.label,color:g.color,sort_order:i}));
+    // presets
+    const pRows=presets.map((p,i)=>({id:p.id,user_id:uid,name:p.name,genre:p.genre,sort_order:i}));
+
+    await Promise.all([
+      tRows.length?SB.from('tasks').upsert(tRows,{onConflict:'id'}):Promise.resolve(),
+      SB.from('genres').upsert(gRows,{onConflict:'id'}),
+      SB.from('presets').upsert(pRows,{onConflict:'id'}),
+    ]);
+  }catch(e){console.error('sbSave exception',e);}
+}
+
+// ── Supabase からタスク単件削除 ──
+async function sbDeleteTask(id){
+  if(!SB||!SB_USER)return;
+  await SB.from('tasks').delete().eq('id',id).eq('user_id',SB_USER.id);
+}
+
+// ── ログインUI制御 ──
+function showLoginUI(){
+  const ov=document.getElementById('login-ov');
+  ov.style.display='flex';
+  const lerr=document.getElementById('l-err');
+  document.getElementById('l-signin').addEventListener('click',async()=>{
+    const e=document.getElementById('l-email').value.trim();
+    const p=document.getElementById('l-pass').value;
+    if(!e||!p){lerr.textContent='メールとパスワードを入力してください';lerr.style.display='block';return;}
+    document.getElementById('l-signin').textContent='...';
+    const err=await sbSignIn(e,p);
+    if(err){lerr.textContent=err.message==='Invalid login credentials'?'メールまたはパスワードが違います':err.message;lerr.style.display='block';document.getElementById('l-signin').textContent='ログイン';}
+  });
+  document.getElementById('l-signup').addEventListener('click',async()=>{
+    const e=document.getElementById('l-email').value.trim();
+    const p=document.getElementById('l-pass').value;
+    if(!e||!p||p.length<6){lerr.textContent='メールとパスワード(6文字以上)を入力してください';lerr.style.display='block';return;}
+    document.getElementById('l-signup').textContent='...';
+    const err=await sbSignUp(e,p);
+    if(err){lerr.textContent=err.message;lerr.style.display='block';document.getElementById('l-signup').textContent='新規登録（初回）';}
+    else{lerr.style.color='#34D399';lerr.textContent='確認メールを送信しました。メールのリンクをクリックしてください。';lerr.style.display='block';document.getElementById('l-signup').textContent='新規登録（初回）';}
+  });
+  document.getElementById('l-google').addEventListener('click',async()=>{
+    const err=await sbSignInGoogle();
+    if(err){lerr.textContent=err.message;lerr.style.display='block';}
+  });
+}
+
+// ── 認証状態を監視してアプリを初期化 ──
+async function initWithAuth(){
+  if(!SB_ENABLED){
+    // Supabase未設定: localStorageモードで動作（従来通り）
+    initApp();
+    return;
+  }
+  // セッション確認
+  const {data:{session}}=await SB.auth.getSession();
+  if(session){
+    SB_USER=session.user;
+    // ログアウトボタンをヘッダーに追加
+    addUserBadge();
+    // DBからデータ読み込み（localStorageを上書き）
+    await sbLoad();
+    initApp();
+    return;
+  }
+  // 未ログイン
+  showLoginUI();
+  // ログイン後のコールバック
+  SB.auth.onAuthStateChange(async(event,session)=>{
+    if(session&&!SB_USER){
+      SB_USER=session.user;
+      document.getElementById('login-ov').style.display='none';
+      // localStorageのデータをSupabaseに移行（初回ログイン時）
+      await migrateLocalToSB();
+      await sbLoad();
+      addUserBadge();
+      initApp();
+    }
+  });
+}
+
+// ── ユーザーバッジをヘッダーに追加 ──
+function addUserBadge(){
+  const hdr=document.getElementById('hdr-right');
+  // ユーザー名表示
+  const name=SB_USER.user_metadata?.full_name||SB_USER.email?.split('@')[0]||'User';
+  const wrap=document.createElement('div');
+  wrap.style.cssText='display:flex;align-items:center;gap:6px';
+  // ユーザー名
+  const uname=document.createElement('span');
+  uname.style.cssText='font-size:10px;color:#64748B;letter-spacing:.06em;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+  uname.textContent=name;
+  uname.title=SB_USER.email||'';
+  // ログアウトボタン
+  const btn=document.createElement('button');
+  btn.style.cssText='background:none;border:1px solid rgba(239,68,68,.3);border-radius:20px;padding:3px 10px;color:#94A3B8;font-size:10px;cursor:pointer;font-family:inherit;letter-spacing:.06em;transition:all .15s;flex-shrink:0';
+  btn.textContent='ログアウト';
+  btn.addEventListener('mouseenter',()=>{btn.style.borderColor='rgba(239,68,68,.7)';btn.style.color='#F87171';});
+  btn.addEventListener('mouseleave',()=>{btn.style.borderColor='rgba(239,68,68,.3)';btn.style.color='#94A3B8';});
+  btn.addEventListener('click',()=>{if(confirm('ログアウトしますか？'))sbSignOut();});
+  wrap.appendChild(uname);
+  wrap.appendChild(btn);
+  hdr.insertBefore(wrap,hdr.firstChild);
+}
+
+// ── localStorageのデータをSupabaseに移行（初回ログイン時のみ） ──
+async function migrateLocalToSB(){
+  if(!SB||!SB_USER)return;
+  const uid=SB_USER.id;
+  // 既にDBにデータがあれば移行しない
+  const {data}=await SB.from('tasks').select('id').eq('user_id',uid).limit(1);
+  if(data&&data.length>0)return;
+  // localStorageのデータを読み込み
+  try{
+    const lsTasks=JSON.parse(localStorage.getItem(LS_T)||'[]');
+    const lsGenres=JSON.parse(localStorage.getItem(LS_G)||'null')||[];
+    const lsPresets=JSON.parse(localStorage.getItem(LS_P)||'null')||[];
+    if(lsTasks.length||lsGenres.length||lsPresets.length){
+      // 移行
+      tasks=lsTasks.filter(t=>t&&t.id&&t.name&&typeof t.duration==='number'&&t.duration>=0&&t.startDate);
+      if(lsGenres.length)genres=lsGenres;
+      if(lsPresets.length)presets=lsPresets;
+      await sbSave();
+      console.log('localStorageデータをSupabaseに移行しました');
+    }
+  }catch(e){console.warn('migrate error',e);}
+}
+
 const LS_T='cw2-tasks', LS_G='cw2-genres', LS_P='cw2-presets', LS_A='cw2-active';
 const DG=[
   {id:'strategy',label:'戦略・企画',color:'#F59E0B'},
@@ -489,13 +703,16 @@ let active=null, elapsed=0, timerID=null, editPID=null, curView='tasks';
 })();
 
 function sv(){
+  // localStorageに即時保存（オフラインバッファ）
   try{
     localStorage.setItem(LS_T,JSON.stringify(tasks));
     localStorage.setItem(LS_G,JSON.stringify(genres));
     localStorage.setItem(LS_P,JSON.stringify(presets));
     if(active){localStorage.setItem(LS_A,JSON.stringify({...active,_elapsed:Date.now()-active.startTime}));}
     else{localStorage.removeItem(LS_A);}
-  }catch(e){console.warn('CHRONO WORK: 保存失敗',e);}
+  }catch(e){console.warn('CHRONO WORK: LS保存失敗',e);}
+  // Supabaseにも非同期保存
+  if(SB_ENABLED&&SB_USER) sbSave().catch(e=>console.warn('sbSave fail',e));
 }
 function gbi(id){return genres.find(g=>g.id===id)||{id:"?",label:id,color:"#64748B"};}
 function pc(p){return gbi(p.genre).color;}
@@ -797,11 +1014,44 @@ function renderLog(){
         </div>
       </div>
       <div class="lr-err"></div>
-      <button class="lr-del">✕</button>`;
+      <div class="lr-actions">
+        <button class="lr-replay" title="このタスクを再実行">▶</button>
+        <button class="lr-del">✕</button>
+      </div>`;
+
+    // ── 再実行 ──
+    row.querySelector('.lr-replay').addEventListener('click',()=>{
+      // プリセットに対応するものがあればそれを使う、なければ名前・ジャンルで即START
+      const matchPreset=presets.find(p=>p.id===t.presetId||(p.name===t.name&&p.genre===t.genre));
+      if(matchPreset){
+        sv2('tasks'); // TASKSタブに戻る
+        startP(matchPreset.id);
+      } else {
+        // プリセットにない場合: 一時的なactiveを作成して即START
+        if(active)stopTask();
+        const _now=Date.now();
+        active={
+          id:'t_'+_now+'_'+Math.random().toString(36).slice(2,7),
+          presetId:null, name:t.name, genre:t.genre,
+          startTime:_now, startDate:new Date().toISOString()
+        };
+        elapsed=0;clearInterval(timerID);
+        timerID=setInterval(()=>{
+          elapsed=Date.now()-active.startTime;
+          sv();
+          document.getElementById('ab-elapsed').textContent=fd(elapsed);
+          renderTbar();
+          if(curView==='tasks')renderPL();
+        },200);
+        sv();
+        renderAB();renderTbar();
+        sv2('tasks'); // TASKSタブに戻る
+      }
+    });
 
     // ── 削除 ──
     row.querySelector('.lr-del').addEventListener('click',()=>{
-      tasks=tasks.filter(x=>x.id!==t.id);sv();ubadge();renderLog();renderTbar();renderPL();
+      const _did=t.id;tasks=tasks.filter(x=>x.id!==_did);if(SB_ENABLED&&SB_USER)sbDeleteTask(_did).catch(()=>{});sv();ubadge();renderLog();renderTbar();renderPL();
     });
 
     // ── 時刻正規化（"720"→"07:20", "0720"→"07:20", "7:2"→"07:02" など） ──
@@ -991,7 +1241,7 @@ function renderAllLog(){
     const g=gbi(t.genre),row=document.createElement('div');
     row.className='lrow';
     row.innerHTML=`<div class="lr-acc" style="background:${g.color}"></div><span style="font-size:10px;color:var(--slate);min-width:60px;flex-shrink:0">${dstr(t.startDate)}</span><div class="lr-info"><div class="lr-name">${eh(t.name)}</div></div>${bdg(g)}<div class="lr-dur">${fd(t.duration)}</div><button class="lr-del">✕</button>`;
-    row.querySelector('.lr-del').addEventListener('click',()=>{tasks=tasks.filter(x=>x.id!==t.id);sv();ubadge();renderAllLog();uexp();});
+    row.querySelector('.lr-del').addEventListener('click',()=>{const _did2=t.id;tasks=tasks.filter(x=>x.id!==_did2);if(SB_ENABLED&&SB_USER)sbDeleteTask(_did2).catch(()=>{});sv();ubadge();renderAllLog();uexp();});
     el.appendChild(row);
   });
   if(tasks.length>30){const m=document.createElement('div');m.style.cssText='font-size:10px;color:var(--slate-dim);padding:8px;text-align:center';m.textContent='… 他 '+(tasks.length-30)+' 件';el.appendChild(m);}
@@ -1180,7 +1430,7 @@ function sv2(v){
 }
 
 // INIT
-(function(){
+function initApp(){
   const today=tid();
   document.getElementById('exp-from').value=today;
   document.getElementById('exp-to').value=today;
@@ -1270,7 +1520,10 @@ function sv2(v){
     if(sumFrom&&sumTo<sumFrom){sumFrom=sumTo;document.getElementById('sum-from').value=sumTo;}
     renderSum();
   });
-})();
+}
+
+// エントリーポイント: 認証確認してからアプリ初期化
+window.addEventListener('DOMContentLoaded',()=>initWithAuth());
 
 function addG(){
   const inp=document.getElementById('ginput'),l=inp.value.trim();if(!l)return;
@@ -1286,5 +1539,31 @@ function addP(){
   renderPL();
 }
 </script>
+<!-- LOGIN OVERLAY -->
+<div id="login-ov" style="display:none;position:fixed;inset:0;background:#060C18;z-index:9000;flex-direction:column;align-items:center;justify-content:center;gap:20px">
+  <div style="text-align:center;margin-bottom:8px">
+    <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:#F59E0B;letter-spacing:.15em">CHRONO WORK</div>
+    <div style="font-size:11px;color:#475569;margin-top:4px;letter-spacing:.1em">TIME TRACKER</div>
+  </div>
+  <div id="login-box" style="background:#0D1526;border:1px solid rgba(245,158,11,.2);border-radius:12px;padding:28px 24px;width:min(340px,90vw);display:flex;flex-direction:column;gap:14px">
+    <div id="login-mode-email" style="display:flex;flex-direction:column;gap:10px">
+      <input id="l-email" class="inp" type="email" placeholder="メールアドレス" autocomplete="email">
+      <input id="l-pass" class="inp" type="password" placeholder="パスワード" autocomplete="current-password">
+      <button class="btn btn-a" id="l-signin" style="width:100%;justify-content:center">ログイン</button>
+      <button class="btn btn-g" id="l-signup" style="width:100%;justify-content:center;font-size:11px">新規登録（初回）</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin:0 -4px">
+      <div style="flex:1;height:1px;background:rgba(100,116,139,.2)"></div>
+      <span style="font-size:10px;color:#475569">または</span>
+      <div style="flex:1;height:1px;background:rgba(100,116,139,.2)"></div>
+    </div>
+    <button class="btn btn-g" id="l-google" style="width:100%;justify-content:center;gap:8px">
+      <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-3.59-13.46-8.72l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+      Googleでログイン
+    </button>
+    <div id="l-err" style="font-size:11px;color:#F87171;text-align:center;display:none"></div>
+  </div>
+  <div style="font-size:10px;color:#334155">データはSupabaseに安全に保存されます</div>
+</div>
 </body>
 </html>
