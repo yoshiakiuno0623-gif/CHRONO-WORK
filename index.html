@@ -538,6 +538,14 @@ async function sbDeleteTask(id){
   if(!SB||!SB_USER)return;
   await SB.from('tasks').delete().eq('id',id).eq('user_id',SB_USER.id);
 }
+async function sbDeletePreset(id){
+  if(!SB||!SB_USER)return;
+  await SB.from('presets').delete().eq('id',id).eq('user_id',SB_USER.id);
+}
+async function sbDeleteGenre(id){
+  if(!SB||!SB_USER)return;
+  await SB.from('genres').delete().eq('id',id).eq('user_id',SB_USER.id);
+}
 
 // ── ログインUI制御 ──
 function showLoginUI(){
@@ -818,7 +826,7 @@ function renderPL(){
     // ── EDIT / DELETE ──
     row.querySelector('.pr-ico:not(.del)').addEventListener('click',()=>openEdit(p.id));
     row.querySelector('.pr-ico.del').addEventListener('click',()=>{
-      if(confirm(`「${p.name}」を削除しますか？`)){presets=presets.filter(x=>x.id!==p.id);sv();renderPL();rgs();}
+      if(confirm(`「${p.name}」を削除しますか？`)){const _pid=p.id;presets=presets.filter(x=>x.id!==_pid);if(SB_ENABLED&&SB_USER)sbDeletePreset(_pid).catch(e=>console.warn('sbDeletePreset fail',e));sv();renderPL();rgs();}
     });
 
     // ── DRAG (mouse) ──
@@ -1368,7 +1376,10 @@ function rg(){
     if(genres.length<=1)rm.style.display='none';
     rm.addEventListener('click',()=>{
       if(confirm(`ジャンル「${g.label}」を削除しますか？`)){
-        genres=genres.filter(x=>x.id!==g.id);sv();rg();rgs();renderPL();
+        const _gid=g.id;
+        genres=genres.filter(x=>x.id!==_gid);
+        if(SB_ENABLED&&SB_USER)sbDeleteGenre(_gid).catch(e=>console.warn('sbDeleteGenre fail',e));
+        sv();rg();rgs();renderPL();
       }
     });
     // スウォッチパネル（展開/折りたたみ）
