@@ -1,0 +1,39 @@
+name: Supabase Keepalive
+
+# Supabase Freeプランの自動pause（7日間無アクセス）を防ぐため、
+# 週2回REST APIを叩いてアクティビティを発生させる
+on:
+  schedule:
+    - cron: '0 0 * * 1,4' # 月・木 UTC 0:00 = JST 9:00
+  workflow_dispatch: # 手動実行用
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write # keepalive-workflow がワークフローの自動無効化を解除するのに必要
+    steps:
+      - name: Ping Supabase REST API
+        env:
+          # anon public key（index.htmlに埋め込み済みの公開キー。シークレットではない）
+          ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imhuc2dtZnh1cG16eWllZmNodG1iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwNjQ5ODIsImV4cCI6MjA5MTY0MDk4Mn0.uwdGwXcKtWbpScNLONhUr8BOz-6uE-amQlOycQX_6Vc
+        run: |
+          STATUS=$(curl -s -o /tmp/res.txt -w "%{http_code}" --max-time 30 \
+            "https://hnsgmfxupmzyiefchtmb.supabase.co/rest/v1/tasks?select=id&limit=1" \
+            -H "apikey: ${ANON_KEY}" \
+            -H "Authorization: Bearer ${ANON_KEY}")
+          echo "[keepalive] HTTP ${STATUS}"
+          cat /tmp/res.txt
+          # 200 = 正常（RLSにより空配列が返るがAPI活動としてカウントされる）
+          # 000/5xx = プロジェクトがpause中 or 接続不能 → 失敗させて通知に気付けるようにする
+          if [ "${STATUS}" != "200" ]; then
+            echo "::error::Supabase unreachable (paused?). Resume from https://supabase.com/dashboard"
+            exit 1
+          fi
+
+      # リポジトリが60日間更新なしだとGitHubがscheduleを自動停止するため、
+      # APIで有効状態を維持する
+      - name: Keep workflow enabled
+        uses: gautamkrishnar/keepalive-workflow@v2
+        with:
+          use_api: true
