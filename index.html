@@ -573,6 +573,47 @@ function showLoginUI(){
     const err=await sbSignInGoogle();
     if(err){lerr.textContent=err.message;lerr.style.display='block';}
   });
+  document.getElementById('l-forgot').addEventListener('click',async()=>{
+    const e=document.getElementById('l-email').value.trim();
+    lerr.style.color='#F87171';
+    if(!e){lerr.textContent='上のメール欄にアドレスを入力してから押してください';lerr.style.display='block';return;}
+    const btn=document.getElementById('l-forgot');
+    btn.textContent='送信中...';
+    // メール内リンクの戻り先（ハッシュ・クエリを除いた現ページURL）
+    const {error}=await SB.auth.resetPasswordForEmail(e,{redirectTo:location.origin+location.pathname});
+    btn.textContent='パスワードを忘れた方はこちら';
+    if(error){lerr.textContent=error.message;lerr.style.display='block';}
+    else{lerr.style.color='#34D399';lerr.textContent='再設定メールを送信しました。メール内のリンクを開くと新しいパスワードを設定できます。';lerr.style.display='block';}
+  });
+}
+
+// ── パスワード再設定画面（メールのリンクから戻ってきたときに表示） ──
+function showPwResetUI(){
+  if(document.getElementById('pwreset-ov'))return;
+  const ov=document.createElement('div');
+  ov.id='pwreset-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(6,12,24,.96);z-index:9500;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML=`<div style="background:#0D1526;border:1px solid rgba(245,158,11,.2);border-radius:12px;padding:28px 24px;width:min(340px,90vw);display:flex;flex-direction:column;gap:12px">
+    <div style="font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.14em;color:#F59E0B">NEW PASSWORD</div>
+    <p style="font-size:12px;color:#94A3B8;line-height:1.7">新しいパスワードを入力してください（6文字以上）</p>
+    <input id="pw-new" class="inp" type="password" placeholder="新しいパスワード" autocomplete="new-password" style="width:100%">
+    <input id="pw-new2" class="inp" type="password" placeholder="もう一度入力" autocomplete="new-password" style="width:100%">
+    <div id="pw-err" style="display:none;font-size:11px;color:#F87171"></div>
+    <button id="pw-save" class="btn btn-a" style="width:100%;justify-content:center">パスワードを変更</button>
+  </div>`;
+  document.body.appendChild(ov);
+  const perr=document.getElementById('pw-err');
+  document.getElementById('pw-save').addEventListener('click',async()=>{
+    const p1=document.getElementById('pw-new').value, p2=document.getElementById('pw-new2').value;
+    if(p1.length<6){perr.textContent='6文字以上で入力してください';perr.style.display='block';return;}
+    if(p1!==p2){perr.textContent='2つの入力が一致しません';perr.style.display='block';return;}
+    const btn=document.getElementById('pw-save');
+    btn.textContent='...';
+    const {error}=await SB.auth.updateUser({password:p1});
+    if(error){perr.textContent=error.message;perr.style.display='block';btn.textContent='パスワードを変更';return;}
+    btn.textContent='変更しました ✓';
+    setTimeout(()=>location.reload(),800);
+  });
 }
 
 // ── 認証状態を監視してアプリを初期化 ──
@@ -582,6 +623,11 @@ async function initWithAuth(){
     initApp();
     return;
   }
+  // パスワード再設定メールのリンクから戻ってきた場合、新パスワード入力画面を出す
+  // （セッション確立より先に登録しないとイベントを取りこぼす）
+  SB.auth.onAuthStateChange((event)=>{
+    if(event==='PASSWORD_RECOVERY')showPwResetUI();
+  });
   // セッション確認
   const {data:{session}}=await SB.auth.getSession();
   if(session){
@@ -1562,6 +1608,7 @@ function addP(){
       <input id="l-pass" class="inp" type="password" placeholder="パスワード" autocomplete="current-password">
       <button class="btn btn-a" id="l-signin" style="width:100%;justify-content:center">ログイン</button>
       <button class="btn btn-g" id="l-signup" style="width:100%;justify-content:center;font-size:11px">新規登録（初回）</button>
+      <button id="l-forgot" style="background:none;border:none;color:#475569;font-size:10px;cursor:pointer;font-family:inherit;text-decoration:underline;padding:2px;align-self:center">パスワードを忘れた方はこちら</button>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin:0 -4px">
       <div style="flex:1;height:1px;background:rgba(100,116,139,.2)"></div>
