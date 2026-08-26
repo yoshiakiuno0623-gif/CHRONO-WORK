@@ -32,9 +32,10 @@ jobs:
           fi
 
       # リポジトリが60日間更新なしだとGitHubがscheduleを自動停止するため、
-      # APIで有効状態を維持する（pingが失敗した回でも必ず実行する）
+      # enable APIを叩いて無効化タイマーをリセットする（pingが失敗した回でも必ず実行する）
+      # ※サードパーティActionはこのリポジトリ設定でブロックされるため gh api で直接実行
       - name: Keep workflow enabled
         if: always()
-        uses: gautamkrishnar/keepalive-workflow@v2
-        with:
-          use_api: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/keepalive.yml/enable"
