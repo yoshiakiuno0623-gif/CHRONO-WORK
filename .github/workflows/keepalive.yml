@@ -32,8 +32,9 @@ jobs:
           fi
 
       # リポジトリが60日間更新なしだとGitHubがscheduleを自動停止するため、
-      # APIで有効状態を維持する
+      # APIで有効状態を維持する（pingが失敗した回でも必ず実行する）
       - name: Keep workflow enabled
+        if: always()
         uses: gautamkrishnar/keepalive-workflow@v2
         with:
           use_api: true
