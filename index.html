@@ -42,6 +42,17 @@ body{min-height:100vh;background:linear-gradient(150deg,#05090F 0%,#09111E 50%,#
 #ab-stop{padding:8px 14px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.4);border-radius:6px;color:#F87171;font-size:11px;letter-spacing:.08em;cursor:pointer;font-family:inherit;font-weight:700;flex-shrink:0;transition:all .15s}
 #ab-stop:hover,#ab-stop:active{background:rgba(239,68,68,.2)}
 
+/* STOP DOCK（稼働中に画面下部へ固定表示する停止バー） */
+#stop-dock{display:none;position:fixed;left:0;right:0;bottom:0;z-index:400;background:rgba(5,9,15,.94);backdrop-filter:blur(16px);border-top:1px solid rgba(245,158,11,.25);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));align-items:center;gap:14px}
+#stop-dock.show{display:flex}
+#sd-info{flex:1;min-width:0;text-align:right}
+#sd-name{font-size:12px;color:#CBD5E1;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#sd-elapsed{font-size:22px;font-weight:700;color:var(--amber);font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;line-height:1.1}
+#sd-stop{width:62px;height:62px;border-radius:50%;background:rgba(239,68,68,.12);border:2px solid rgba(239,68,68,.55);color:#F87171;font-size:20px;cursor:pointer;flex-shrink:0;font-family:inherit;transition:all .15s;animation:pulse 1.6s ease-in-out infinite}
+#sd-stop:hover,#sd-stop:active{background:rgba(239,68,68,.25);transform:scale(1.05);animation:none}
+#sd-side{flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden}
+body.running #main{padding-bottom:140px}
+
 /* GENRE EDITOR */
 #ged-wrap{display:none;background:rgba(99,102,241,.04);border-bottom:1px solid rgba(99,102,241,.15);padding:12px 14px}
 #ged-wrap.open{display:block}
@@ -329,6 +340,10 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
         <button class="btn btn-a" id="np-add">追加</button>
         <button class="btn btn-g" id="np-cancel">キャンセル</button>
       </div>
+    </div>
+    <div id="today-wrap" style="display:none;margin-top:20px">
+      <div class="slbl">─── 本日の実績（時刻クリックで修正） ───</div>
+      <div id="today-log"></div>
     </div>
   </div>
 
@@ -790,6 +805,12 @@ function clk(){
 }
 
 // ACTIVE
+// 経過時間表示の一括更新（上部アクティブバー＋下部停止ドック）
+function updElapsed(){
+  const s=fd(elapsed);
+  document.getElementById('ab-elapsed').textContent=s;
+  document.getElementById('sd-elapsed').textContent=s;
+}
 function startP(pid){
   const p=presets.find(x=>x.id===pid);if(!p)return;
   if(active)stopTask();
@@ -799,7 +820,7 @@ function startP(pid){
   elapsed=0;clearInterval(timerID);
   timerID=setInterval(()=>{
     elapsed=Date.now()-active.startTime;
-    document.getElementById('ab-elapsed').textContent=fd(elapsed);
+    updElapsed();
     renderTbar();
     if(curView==='tasks')renderPL();
   },200);
@@ -816,18 +837,30 @@ function stopTask(){
   active=null;elapsed=0;
   localStorage.removeItem(LS_A);
   sv();
-  flash();renderAB();renderPL();renderTbar();ubadge();
+  flash();renderAB();renderPL();renderTbar();ubadge();renderTodayLog();
   if(curView==='log')renderLog();
 }
 function renderAB(){
   const bar=document.getElementById('active-bar');
-  if(!active){bar.classList.remove('show');return;}
+  const dock=document.getElementById('stop-dock');
+  if(!active){
+    bar.classList.remove('show');
+    dock.classList.remove('show');
+    document.body.classList.remove('running');
+    return;
+  }
   const g=gbi(active.genre);
   document.getElementById('ab-accent').style.background=g.color;
   document.getElementById('ab-name').textContent=active.name;
   document.getElementById('ab-sub').innerHTML=bdg(g)+`<span style="font-size:10px;color:var(--slate);margin-left:4px">${ft(active.startDate)} 〜</span>`;
   document.getElementById('ab-elapsed').textContent=fd(elapsed);
   bar.classList.add('show');
+  // 停止ドック
+  document.getElementById('sd-name').textContent=active.name;
+  document.getElementById('sd-side').innerHTML=bdg(g)+`<span style="font-size:10px;color:var(--slate)">${ft(active.startDate)} 〜</span>`;
+  document.getElementById('sd-elapsed').textContent=fd(elapsed);
+  dock.classList.add('show');
+  document.body.classList.add('running');
 }
 
 // PRESET LIST
@@ -1032,7 +1065,22 @@ function renderLog(){
     return;
   }
   el.innerHTML='';
-  tt.forEach(t=>{
+  tt.forEach(t=>{el.appendChild(makeLogRow(t,()=>{renderLog();renderTbar();renderTodayLog();renderPL();ubadge();}));});
+}
+
+// ── 本日の実績（TASKSタブに累積表示・時刻インライン修正可） ──
+function renderTodayLog(){
+  const wrap=document.getElementById('today-wrap'),el=document.getElementById('today-log');
+  const tt=ttasks().filter(t=>t.endDate);
+  if(!tt.length){wrap.style.display='none';el.innerHTML='';return;}
+  wrap.style.display='block';
+  el.innerHTML='';
+  tt.forEach(t=>{el.appendChild(makeLogRow(t,()=>{renderTodayLog();renderTbar();renderPL();ubadge();if(curView==='log')renderLog();}));});
+}
+
+// ── ログ1行を生成（時刻インライン編集・再実行・削除つき。refresh=更新後の再描画） ──
+function makeLogRow(t,refresh){
+    const rowDate=dstr(t.startDate);
     const g=gbi(t.genre);
     const row=document.createElement('div');
     row.className='lrow';
@@ -1093,7 +1141,7 @@ function renderLog(){
         timerID=setInterval(()=>{
           elapsed=Date.now()-active.startTime;
           sv();
-          document.getElementById('ab-elapsed').textContent=fd(elapsed);
+          updElapsed();
           renderTbar();
           if(curView==='tasks')renderPL();
         },200);
@@ -1105,7 +1153,7 @@ function renderLog(){
 
     // ── 削除 ──
     row.querySelector('.lr-del').addEventListener('click',()=>{
-      const _did=t.id;tasks=tasks.filter(x=>x.id!==_did);if(SB_ENABLED&&SB_USER)sbDeleteTask(_did).catch(()=>{});sv();ubadge();renderLog();renderTbar();renderPL();
+      const _did=t.id;tasks=tasks.filter(x=>x.id!==_did);if(SB_ENABLED&&SB_USER)sbDeleteTask(_did).catch(()=>{});sv();refresh();
     });
 
     // ── 時刻正規化（"720"→"07:20", "0720"→"07:20", "7:2"→"07:02" など） ──
@@ -1166,7 +1214,7 @@ function renderLog(){
         return;
       }
       if(normE!==null){
-        const sd=hmToDate(logDate,normS), ed=hmToDate(logDate,normE);
+        const sd=hmToDate(rowDate,normS), ed=hmToDate(rowDate,normE);
         if(sd&&ed&&ed<=sd){
           errEl.textContent='終了は開始より後にしてください';
           errEl.classList.add('show');
@@ -1176,8 +1224,8 @@ function renderLog(){
       }
 
       // ── 変換 ──
-      const sd=hmToDate(logDate,normS);
-      const ed=normE?hmToDate(logDate,normE):null;
+      const sd=hmToDate(rowDate,normS);
+      const ed=normE?hmToDate(rowDate,normE):null;
       if(!sd||isNaN(sd.getTime())){
         errEl.textContent='時刻変換エラー';errEl.classList.add('show');
         return;
@@ -1195,8 +1243,8 @@ function renderLog(){
         return{...x,startDate:newStart,startTime:sd.getTime(),endDate:newEnd,endTime:ed?ed.getTime():x.endTime,duration:newDur};
       });
       sv();
-      renderLog();renderTbar();
-      // renderLogで行全体が再描画されるのでここで終了
+      refresh();
+      // refreshで行全体が再描画されるのでここで終了
     }
 
     function setupChip(chip, input, isStart){
@@ -1243,7 +1291,7 @@ function renderLog(){
         const ns=normalizeTime(rawS2), ne=rawE2?normalizeTime(rawE2):null;
         const durEl=row.querySelector('.lr-dur-val');
         if(ns&&ne){
-          const sd=hmToDate(logDate,ns),ed=hmToDate(logDate,ne);
+          const sd=hmToDate(rowDate,ns),ed=hmToDate(rowDate,ne);
           if(sd&&ed&&ed>sd){durEl.textContent=fd(ed-sd);durEl.classList.add('live');return;}
         }
         durEl.textContent=durStr;durEl.classList.remove('live');
@@ -1253,8 +1301,7 @@ function renderLog(){
     setupChip(row.querySelector('.lr-tchip-s'), row.querySelector('.lr-tinput-s'), true);
     setupChip(row.querySelector('.lr-tchip-e'), row.querySelector('.lr-tinput-e'), false);
 
-    el.appendChild(row);
-  });
+    return row;
 }
 function shiftLogDate(delta){
   const d=new Date(logDate+'T12:00:00');
@@ -1410,10 +1457,39 @@ function rg(){
     swatch.title='カラーを変更';
     swatch.addEventListener('mouseenter',()=>swatch.style.transform='scale(1.12)');
     swatch.addEventListener('mouseleave',()=>swatch.style.transform='');
-    // ジャンル名
+    // ジャンル名（クリックで名前変更。IDは維持されるので既存ログ・プリセットの紐付けは変わらない）
     const lbl=document.createElement('span');
     lbl.textContent=g.label;
-    lbl.style.cssText=`font-size:12px;flex:1;color:${g.color};font-weight:500`;
+    lbl.title='クリックして名前を変更';
+    lbl.style.cssText=`font-size:12px;flex:1;color:${g.color};font-weight:500;cursor:pointer`;
+    const nameInp=document.createElement('input');
+    nameInp.className='inp';
+    nameInp.style.cssText='flex:1;display:none;padding:4px 8px;font-size:12px';
+    lbl.addEventListener('click',()=>{
+      lbl.style.display='none';
+      nameInp.style.display='block';
+      nameInp.value=g.label;
+      nameInp.dataset.abort='';
+      setTimeout(()=>{nameInp.focus();nameInp.select();},0);
+    });
+    const commitName=()=>{
+      const v=nameInp.value.trim();
+      nameInp.style.display='none';lbl.style.display='';
+      if(!v||v===g.label)return;
+      genres=genres.map(x=>x.id===g.id?{...x,label:v}:x);
+      sv();rg();rgs();renderPL();renderTodayLog();
+      if(curView==='log')renderLog();
+    };
+    nameInp.addEventListener('keydown',e=>{
+      if(e.key==='Enter'){e.preventDefault();commitName();}
+      if(e.key==='Escape'){nameInp.dataset.abort='1';nameInp.style.display='none';lbl.style.display='';}
+    });
+    nameInp.addEventListener('blur',()=>{
+      setTimeout(()=>{
+        if(nameInp.dataset.abort==='1'){nameInp.dataset.abort='';return;}
+        if(nameInp.style.display!=='none')commitName();
+      },100);
+    });
     // 削除ボタン
     const rm=document.createElement('button');
     rm.textContent='✕';rm.style.cssText='background:none;border:none;color:#334155;cursor:pointer;font-size:12px;padding:3px 5px;transition:color .15s;flex-shrink:0';
@@ -1462,7 +1538,7 @@ function rg(){
       panel.style.display=open?'flex':'none';
       swatch.style.borderColor=open?'#fff':'rgba(255,255,255,.2)';
     });
-    row.appendChild(swatch);row.appendChild(lbl);row.appendChild(rm);
+    row.appendChild(swatch);row.appendChild(lbl);row.appendChild(nameInp);row.appendChild(rm);
     el.appendChild(row);
     // パネルは行の下に別要素として追加
     const panelRow=document.createElement('div');
@@ -1491,7 +1567,7 @@ function initApp(){
   const today=tid();
   document.getElementById('exp-from').value=today;
   document.getElementById('exp-to').value=today;
-  rgs();rg();renderPL();renderTbar();ubadge();clk();
+  rgs();rg();renderPL();renderTbar();renderTodayLog();ubadge();clk();
   // リロード後のactive復元: タイマー再開
   if(active){
     elapsed=Date.now()-active.startTime;
@@ -1499,7 +1575,7 @@ function initApp(){
     timerID=setInterval(()=>{
       elapsed=Date.now()-active.startTime;
       sv(); // 定期的にactiveを保存（クラッシュ対策）
-      document.getElementById('ab-elapsed').textContent=fd(elapsed);
+      updElapsed();
       renderTbar();
       if(curView==='tasks')renderPL();
     },200);
@@ -1529,6 +1605,7 @@ function initApp(){
   document.getElementById('np-add').addEventListener('click',addP);
   document.getElementById('np-name').addEventListener('keydown',e=>{if(e.key==='Enter')addP();});
   document.getElementById('ab-stop').addEventListener('click',stopTask);
+  document.getElementById('sd-stop').addEventListener('click',stopTask);
   document.getElementById('edit-cancel').addEventListener('click',closeModal);
   document.getElementById('edit-save').addEventListener('click',saveEdit);
   document.getElementById('modal-ov').addEventListener('click',e=>{if(e.target===document.getElementById('modal-ov'))closeModal();});
@@ -1596,6 +1673,16 @@ function addP(){
   renderPL();
 }
 </script>
+<!-- STOP DOCK -->
+<div id="stop-dock">
+  <div id="sd-info">
+    <div id="sd-name"></div>
+    <div id="sd-elapsed">00:00</div>
+  </div>
+  <button id="sd-stop" title="計測を停止">■</button>
+  <div id="sd-side"></div>
+</div>
+
 <!-- LOGIN OVERLAY -->
 <div id="login-ov" style="display:none;position:fixed;inset:0;background:#060C18;z-index:9000;flex-direction:column;align-items:center;justify-content:center;gap:20px">
   <div style="text-align:center;margin-bottom:8px">
