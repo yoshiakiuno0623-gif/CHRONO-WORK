@@ -50,7 +50,12 @@ body{min-height:100vh;background:linear-gradient(150deg,#05090F 0%,#09111E 50%,#
 #sd-elapsed{font-size:22px;font-weight:700;color:var(--amber);font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;line-height:1.1}
 #sd-stop{width:62px;height:62px;border-radius:50%;background:rgba(239,68,68,.12);border:2px solid rgba(239,68,68,.55);color:#F87171;font-size:20px;cursor:pointer;flex-shrink:0;font-family:inherit;transition:all .15s;animation:pulse 1.6s ease-in-out infinite}
 #sd-stop:hover,#sd-stop:active{background:rgba(239,68,68,.25);transform:scale(1.05);animation:none}
-#sd-side{flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden}
+#sd-side{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:5px;overflow:hidden}
+#sd-acts{display:flex;gap:6px;flex-wrap:wrap}
+.sd-act{background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:6px;color:var(--text-mid);font-size:11px;font-family:inherit;padding:6px 10px;cursor:pointer;transition:all .15s;white-space:nowrap;-webkit-appearance:none}
+.sd-act:hover{border-color:var(--amber);color:var(--amber);background:var(--amber-lo)}
+#sd-cancel:hover{border-color:rgba(239,68,68,.6);color:#F87171;background:rgba(239,68,68,.1)}
+#sd-meta{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--slate);overflow:hidden;white-space:nowrap}
 body.running #main{padding-bottom:140px}
 
 /* GENRE EDITOR */
@@ -61,6 +66,10 @@ body.running #main{padding-bottom:140px}
 .gchip .rm{background:none;border:none;color:var(--slate);cursor:pointer;font-size:12px;padding:0 2px;transition:color .15s;line-height:1}
 .gchip .rm:hover{color:var(--red)}
 #ged-row{display:flex;gap:8px}
+
+/* SETTINGS */
+#set-wrap{display:none;background:rgba(245,158,11,.04);border-bottom:1px solid rgba(245,158,11,.15);padding:12px 14px}
+#set-wrap.open{display:block}
 
 /* MAIN */
 #main{max-width:700px;margin:0 auto;padding:14px 12px 60px}
@@ -284,6 +293,7 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
   <div id="hdr-right">
     <span id="clk-time"></span>
     <button class="nav-btn ind" id="gbtn">GENRE</button>
+    <button class="nav-btn" id="setbtn" title="設定">⚙</button>
   </div>
 </div>
 
@@ -307,6 +317,18 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
     <div id="ged-row" style="margin-top:10px">
       <input class="inp" id="ginput" placeholder="新しいジャンルを追加..." style="flex:1">
       <button class="btn btn-g" id="gadd-btn" style="border-color:#6366F1;color:#6366F1">ADD</button>
+    </div>
+  </div>
+</div>
+
+<!-- SETTINGS -->
+<div id="set-wrap">
+  <div style="max-width:700px;margin:0 auto">
+    <div class="slbl" style="margin-bottom:8px">─── SETTINGS ───</div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <label for="set-daystart" style="font-size:12px;color:var(--text-mid)">1日の開始時刻</label>
+      <select class="inp" id="set-daystart" style="width:104px;padding:6px 10px;font-size:12px"></select>
+      <span id="set-daystart-note" style="font-size:10px;color:var(--slate);flex:1;min-width:180px"></span>
     </div>
   </div>
 </div>
@@ -717,7 +739,10 @@ async function migrateLocalToSB(){
   }catch(e){console.warn('migrate error',e);}
 }
 
-const LS_T='cw2-tasks', LS_G='cw2-genres', LS_P='cw2-presets', LS_A='cw2-active';
+const LS_T='cw2-tasks', LS_G='cw2-genres', LS_P='cw2-presets', LS_A='cw2-active', LS_DS='cw2-daystart';
+// 1日の開始時刻（0〜11）。0なら日付が変わった瞬間が1日の境目。
+// 例: 4にすると深夜2時の作業は「前日」に集計される（日をまたぐ作業が2日に割れない）
+let dayStartHour=(()=>{try{const v=parseInt(localStorage.getItem(LS_DS),10);return(v>=0&&v<=11)?v:0;}catch{return 0;}})();
 const DG=[
   {id:'strategy',label:'戦略・企画',color:'#F59E0B'},
   {id:'writing', label:'ライティング',color:'#10B981'},
@@ -789,7 +814,12 @@ function pad(n){return String(n).padStart(2,'0');}
 function fd(ms){const s=Math.floor(ms/1e3),h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?`${h}:${pad(m)}:${pad(sc)}`:`${pad(m)}:${pad(sc)}`;}
 function fhms(ms){const s=Math.floor(ms/1e3),h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return`${pad(h)}:${pad(m)}:${pad(sc)}`;}
 function ft(d){return new Date(d).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});}
-function dstr(d){return new Date(d).toISOString().slice(0,10);}
+// ── 日付ユーティリティ ──
+// ymd: Dateを「ローカル時刻の」YYYY-MM-DDにする（toISOStringはUTC基準になり日付がずれる）
+function ymd(d){const t=new Date(d);return t.getFullYear()+'-'+pad(t.getMonth()+1)+'-'+pad(t.getDate());}
+// dstr: そのタスクがどの「1日」に属するかを返す。dayStartHour（1日の開始時刻）を考慮する。
+// 例: 開始4時に設定すると、深夜2時の作業は前日扱いになる。
+function dstr(d){const t=new Date(d);t.setHours(t.getHours()-dayStartHour);return ymd(t);}
 function tid(){return dstr(new Date());}
 function ttasks(){return tasks.filter(t=>dstr(t.startDate)===tid());}
 function eh(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -840,6 +870,30 @@ function stopTask(){
   flash();renderAB();renderPL();renderTbar();ubadge();renderTodayLog();
   if(curView==='log')renderLog();
 }
+// 稼働中タスクの「次」にあたるプリセット（タスクリストの並び順で1つ下）
+function nextPreset(){
+  if(!active||!active.presetId)return null;
+  const i=presets.findIndex(p=>p.id===active.presetId);
+  if(i<0||i+1>=presets.length)return null;
+  return presets[i+1];
+}
+// 停止して次のタスクへ（TaskChuteの「次へスキップ」相当）
+function nextTask(){
+  const nx=nextPreset();
+  if(!nx)return;
+  startP(nx.id); // startP内で現在のタスクをstopTaskしてから開始する
+  sv2('tasks');
+}
+// 記録せずに取り消す（押し間違いの復旧用）
+function cancelTask(){
+  if(!active)return;
+  if(elapsed>=60000&&!confirm(`「${active.name}」の計測を記録せずに取り消しますか？\n（${fd(elapsed)} 分の記録は残りません）`))return;
+  clearInterval(timerID);
+  active=null;elapsed=0;
+  localStorage.removeItem(LS_A);
+  sv();
+  renderAB();renderPL();renderTbar();
+}
 function renderAB(){
   const bar=document.getElementById('active-bar');
   const dock=document.getElementById('stop-dock');
@@ -857,8 +911,14 @@ function renderAB(){
   bar.classList.add('show');
   // 停止ドック
   document.getElementById('sd-name').textContent=active.name;
-  document.getElementById('sd-side').innerHTML=bdg(g)+`<span style="font-size:10px;color:var(--slate)">${ft(active.startDate)} 〜</span>`;
+  document.getElementById('sd-meta').innerHTML=bdg(g)+`<span>${ft(active.startDate)} 〜</span>`;
   document.getElementById('sd-elapsed').textContent=fd(elapsed);
+  // 「次へ」は次のプリセットがあるときだけ押せる
+  const nx=nextPreset(),nb=document.getElementById('sd-next');
+  nb.disabled=!nx;
+  nb.style.opacity=nx?'1':'.35';
+  nb.style.cursor=nx?'pointer':'default';
+  nb.title=nx?`停止して「${nx.name}」を開始`:'次のタスクがありません';
   dock.classList.add('show');
   document.body.classList.add('running');
 }
@@ -1038,7 +1098,10 @@ function hmToDate(dateStr, hm){
   const [h,m]=t2.split(':').map(Number);
   if(isNaN(h)||isNaN(m)||h<0||h>23||m<0||m>59) return null;
   const d=new Date(dateStr+'T00:00:00');
-  d.setHours(h,m,0,0); return d;
+  d.setHours(h,m,0,0);
+  // 「1日の開始時刻」より前の時刻は翌カレンダー日を指す（例: 開始4時のとき 02:00 は翌日の未明）
+  if(h<dayStartHour)d.setDate(d.getDate()+1);
+  return d;
 }
 function dateToHM(d){ return pad(new Date(d).getHours())+':'+pad(new Date(d).getMinutes()); }
 
@@ -1306,7 +1369,7 @@ function makeLogRow(t,refresh){
 function shiftLogDate(delta){
   const d=new Date(logDate+'T12:00:00');
   d.setDate(d.getDate()+delta);
-  const nd=d.toISOString().slice(0,10);
+  const nd=ymd(d);
   if(nd>tid())return; // 未来は不可
   logDate=nd;renderLog();
 }
@@ -1327,8 +1390,8 @@ function renderTbar(){
 
 // EXPORT
 function uexp(){
-  const f=new Date(document.getElementById('exp-from').value+'T00:00:00'),t=new Date(document.getElementById('exp-to').value+'T23:59:59');
-  const cnt=tasks.filter(x=>{const d=new Date(x.startDate);return d>=f&&d<=t;}).length;
+  const f=document.getElementById('exp-from').value,t=document.getElementById('exp-to').value;
+  const cnt=tasks.filter(x=>{const k=dstr(x.startDate);return k>=f&&k<=t;}).length;
   const el=document.getElementById('prev-cnt');
   el.textContent=cnt;el.style.color=cnt>0?'var(--green)':'var(--slate-dim)';
   document.getElementById('prev-all').textContent='／ 全期間 '+tasks.length+' 件';
@@ -1348,8 +1411,8 @@ function renderAllLog(){
   if(tasks.length>30){const m=document.createElement('div');m.style.cssText='font-size:10px;color:var(--slate-dim);padding:8px;text-align:center';m.textContent='… 他 '+(tasks.length-30)+' 件';el.appendChild(m);}
 }
 function expCSV(){
-  const f=new Date(document.getElementById('exp-from').value+'T00:00:00'),t=new Date(document.getElementById('exp-to').value+'T23:59:59');
-  const rows=[...tasks].filter(x=>{const d=new Date(x.startDate);return d>=f&&d<=t;}).reverse();
+  const f=document.getElementById('exp-from').value,t=document.getElementById('exp-to').value;
+  const rows=[...tasks].filter(x=>{const k=dstr(x.startDate);return k>=f&&k<=t;}).reverse();
   if(!rows.length){alert('該当データがありません');return;}
   const bom='\uFEFF',hdr='日付,タスク名,ジャンル,開始時刻,終了時刻,経過時間(HH:MM:SS),経過時間(秒)';
   const lines=rows.map(t=>{const g=gbi(t.genre),sd=new Date(t.startDate),ed=t.endDate?new Date(t.endDate):null;return[dstr(sd),`"${t.name.replace(/"/g,'""')}"`,g.label,sd.toLocaleString('ja-JP'),ed?ed.toLocaleString('ja-JP'):'',fhms(t.duration),Math.floor(t.duration/1e3)].join(',');});
@@ -1371,14 +1434,14 @@ function getSumRange(){
   if(sumDays===-1){return{from:sumFrom||t,to:sumTo||t};}
   const d=new Date(t+'T12:00:00');
   d.setDate(d.getDate()-(sumDays-1));
-  return{from:d.toISOString().slice(0,10),to:t};
+  return{from:ymd(d),to:t};
 }
 function renderSum(){
   const {from,to}=getSumRange();
-  const f=new Date(from+'T00:00:00'),te=new Date(to+'T23:59:59');
-  let rangeTasks=tasks.filter(t=>{const d=new Date(t.startDate);return d>=f&&d<=te;});
+  // 「1日の開始時刻」を反映するため、生の時刻ではなく日バケット（dstr）で範囲判定する
+  let rangeTasks=tasks.filter(t=>{const k=dstr(t.startDate);return k>=from&&k<=to;});
   // アクティブ中タスクも含める（today範囲の場合）
-  const incActive=active&&new Date(active.startDate)>=f&&new Date(active.startDate)<=te;
+  const incActive=active&&dstr(active.startDate)>=from&&dstr(active.startDate)<=to;
   if(incActive) rangeTasks=[{...active,duration:elapsed},...rangeTasks];
   const tot=rangeTasks.reduce((a,t)=>a+t.duration,0);
   // 活動日数
@@ -1407,7 +1470,7 @@ function renderSum(){
     // 日ごとの合計を計算
     const dayMap={};
     const cur=new Date(from+'T12:00:00'), end=new Date(to+'T12:00:00');
-    while(cur<=end){const k=cur.toISOString().slice(0,10);dayMap[k]=0;cur.setDate(cur.getDate()+1);}
+    while(cur<=end){const k=ymd(cur);dayMap[k]=0;cur.setDate(cur.getDate()+1);}
     rangeTasks.forEach(t=>{const k=dstr(t.startDate);if(dayMap[k]!==undefined)dayMap[k]+=t.duration;});
     const days=Object.keys(dayMap).sort();
     const maxMs=Math.max(...Object.values(dayMap),1);
@@ -1562,6 +1625,35 @@ function sv2(v){
   if(v==='summary')renderSum();
 }
 
+// SETTINGS（1日の開始時刻）
+function renderDayStartNote(){
+  document.getElementById('set-daystart-note').textContent=
+    dayStartHour===0?'0:00に日付が切り替わります'
+    :`0:00〜${pad(dayStartHour)}:00 の作業は前日として集計されます`;
+}
+function setupSettings(){
+  const sel=document.getElementById('set-daystart');
+  sel.innerHTML='';
+  for(let h=0;h<=11;h++){
+    const o=document.createElement('option');
+    o.value=String(h);o.textContent=pad(h)+':00';
+    if(h===dayStartHour)o.selected=true;
+    sel.appendChild(o);
+  }
+  renderDayStartNote();
+  sel.addEventListener('change',()=>{
+    dayStartHour=parseInt(sel.value,10)||0;
+    try{localStorage.setItem(LS_DS,String(dayStartHour));}catch(e){}
+    renderDayStartNote();
+    // 日の区切りが変わると全集計の所属日が変わるので、表示中のものを作り直す
+    logDate=tid();
+    renderPL();renderTbar();renderTodayLog();ubadge();
+    if(curView==='log')renderLog();
+    if(curView==='export')uexp();
+    if(curView==='summary')renderSum();
+  });
+}
+
 // INIT
 function initApp(){
   const today=tid();
@@ -1589,6 +1681,11 @@ function initApp(){
     const w=document.getElementById('ged-wrap');w.classList.toggle('open');
     document.getElementById('gbtn').classList.toggle('on',w.classList.contains('open'));
   });
+  setupSettings();
+  document.getElementById('setbtn').addEventListener('click',()=>{
+    const w=document.getElementById('set-wrap');w.classList.toggle('open');
+    document.getElementById('setbtn').classList.toggle('on',w.classList.contains('open'));
+  });
   document.getElementById('gadd-btn').addEventListener('click',addG);
   document.getElementById('ginput').addEventListener('keydown',e=>{if(e.key==='Enter')addG();});
 
@@ -1606,6 +1703,8 @@ function initApp(){
   document.getElementById('np-name').addEventListener('keydown',e=>{if(e.key==='Enter')addP();});
   document.getElementById('ab-stop').addEventListener('click',stopTask);
   document.getElementById('sd-stop').addEventListener('click',stopTask);
+  document.getElementById('sd-next').addEventListener('click',nextTask);
+  document.getElementById('sd-cancel').addEventListener('click',cancelTask);
   document.getElementById('edit-cancel').addEventListener('click',closeModal);
   document.getElementById('edit-save').addEventListener('click',saveEdit);
   document.getElementById('modal-ov').addEventListener('click',e=>{if(e.target===document.getElementById('modal-ov'))closeModal();});
@@ -1627,7 +1726,7 @@ function initApp(){
   // SUMMARY期間プリセット
   const today2=tid();
   const d6m=new Date(today2+'T12:00:00');d6m.setMonth(d6m.getMonth()-6);
-  const minDate=d6m.toISOString().slice(0,10);
+  const minDate=ymd(d6m);
   document.getElementById('sum-from').min=minDate;
   document.getElementById('sum-to').min=minDate;
   document.getElementById('sum-from').max=today2;
@@ -1680,7 +1779,13 @@ function addP(){
     <div id="sd-elapsed">00:00</div>
   </div>
   <button id="sd-stop" title="計測を停止">■</button>
-  <div id="sd-side"></div>
+  <div id="sd-side">
+    <div id="sd-acts">
+      <button class="sd-act" id="sd-next" title="停止して次のタスクを開始">⏭ 次へ</button>
+      <button class="sd-act" id="sd-cancel" title="記録せずに取り消す">↩ 取り消し</button>
+    </div>
+    <div id="sd-meta"></div>
+  </div>
 </div>
 
 <!-- LOGIN OVERLAY -->
