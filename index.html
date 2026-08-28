@@ -56,6 +56,14 @@ body{min-height:100vh;background:linear-gradient(150deg,#05090F 0%,#09111E 50%,#
 .sd-act:hover{border-color:var(--amber);color:var(--amber);background:var(--amber-lo)}
 #sd-cancel:hover{border-color:rgba(239,68,68,.6);color:#F87171;background:rgba(239,68,68,.1)}
 #sd-meta{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--slate);overflow:hidden;white-space:nowrap}
+#sd-start-lbl{font-size:9px;letter-spacing:.08em}
+/* 稼働中タスクの開始時刻（クリックで修正できる） */
+#sd-start{font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:var(--text-mid);background:rgba(255,255,255,.05);border:1px solid transparent;border-radius:5px;padding:3px 7px;cursor:pointer;transition:all .15s;line-height:1.2;font-family:inherit;-webkit-appearance:none}
+#sd-start:hover{border-color:rgba(245,158,11,.4);color:var(--amber);background:var(--amber-lo)}
+#sd-start-inp{display:none;font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;color:var(--amber);background:var(--amber-lo);border:1px solid rgba(245,158,11,.6);border-radius:5px;padding:3px 6px;outline:none;width:64px;-webkit-appearance:none}
+#sd-start-inp.show{display:block}
+#sd-err{display:none;font-size:10px;color:#F87171}
+#sd-err.show{display:block}
 body.running #main{padding-bottom:140px}
 
 /* GENRE EDITOR */
@@ -894,6 +902,42 @@ function cancelTask(){
   sv();
   renderAB();renderPL();renderTbar();
 }
+// ── 稼働中タスクの開始時刻をインライン修正（開始ボタンの押し忘れ・押し遅れの補正） ──
+function openActiveStartEdit(){
+  if(!active)return;
+  const chip=document.getElementById('sd-start'),inp=document.getElementById('sd-start-inp');
+  chip.style.display='none';
+  inp.value=dateToHM(active.startDate);
+  inp.classList.add('show');
+  inp.dataset.aborted='';
+  setTimeout(()=>{inp.focus();inp.select();},0);
+}
+function closeActiveStartEdit(){
+  document.getElementById('sd-start-inp').classList.remove('show');
+  document.getElementById('sd-start').style.display='';
+}
+function commitActiveStart(){
+  const inp=document.getElementById('sd-start-inp'),err=document.getElementById('sd-err');
+  if(!active||!inp.classList.contains('show')||inp.dataset.aborted==='1')return;
+  const norm=normalizeTime(inp.value);
+  if(norm===null){
+    err.textContent='時刻が無効です（例: 0930 または 09:30）';err.classList.add('show');
+    setTimeout(()=>inp.focus(),0);
+    return;
+  }
+  let sd=hmToDate(dstr(new Date()),norm);
+  if(!sd||isNaN(sd.getTime())){err.textContent='時刻変換エラー';err.classList.add('show');return;}
+  const now=Date.now();
+  // 未来になる場合は「直近のその時刻」＝前日とみなす（日をまたいで計測中のケース）
+  if(sd.getTime()>now)sd=new Date(sd.getTime()-86400000);
+  err.classList.remove('show');err.textContent='';
+  active.startTime=sd.getTime();
+  active.startDate=sd.toISOString();
+  elapsed=now-active.startTime;
+  closeActiveStartEdit();
+  sv();
+  updElapsed();renderAB();renderTbar();renderPL();
+}
 function renderAB(){
   const bar=document.getElementById('active-bar');
   const dock=document.getElementById('stop-dock');
@@ -911,7 +955,11 @@ function renderAB(){
   bar.classList.add('show');
   // 停止ドック
   document.getElementById('sd-name').textContent=active.name;
-  document.getElementById('sd-meta').innerHTML=bdg(g)+`<span>${ft(active.startDate)} 〜</span>`;
+  document.getElementById('sd-genre').innerHTML=bdg(g);
+  // 編集中は上書きしない（入力中に値が戻るのを防ぐ）
+  if(!document.getElementById('sd-start-inp').classList.contains('show')){
+    document.getElementById('sd-start').textContent=dateToHM(active.startDate);
+  }
   document.getElementById('sd-elapsed').textContent=fd(elapsed);
   // 「次へ」は次のプリセットがあるときだけ押せる
   const nx=nextPreset(),nb=document.getElementById('sd-next');
@@ -1105,6 +1153,25 @@ function hmToDate(dateStr, hm){
 }
 function dateToHM(d){ return pad(new Date(d).getHours())+':'+pad(new Date(d).getMinutes()); }
 
+// ── 時刻正規化（"720"→"07:20", "0720"→"07:20", "7:2"→"07:02" など） ──
+// ログ行の編集と稼働中タスクの開始時刻編集で共用する
+function normalizeTime(raw){
+  if(!raw||!raw.trim())return null;
+  const s=raw.trim();
+  // HH:MM 形式
+  if(/^\d{1,2}:\d{2}$/.test(s)){
+    const [h,m]=s.split(':').map(Number);
+    if(h>=0&&h<=23&&m>=0&&m<=59)return pad(h)+':'+pad(m);
+    return null;
+  }
+  // 数字のみ
+  const digits=s.replace(/\D/g,'');
+  if(digits.length===3){const h=Number(digits[0]),m=Number(digits.slice(1));if(h<=9&&m<=59)return pad(h)+':'+pad(m);}
+  if(digits.length===4){const h=Number(digits.slice(0,2)),m=Number(digits.slice(2));if(h<=23&&m<=59)return pad(h)+':'+pad(m);}
+  if(digits.length===1||digits.length===2){const h=Number(digits);if(h>=0&&h<=23)return pad(h)+':00';}
+  return null;
+}
+
 function renderLog(){
   const el=document.getElementById('log-wrap');
   document.getElementById('log-date').value=logDate;
@@ -1218,24 +1285,6 @@ function makeLogRow(t,refresh){
     row.querySelector('.lr-del').addEventListener('click',()=>{
       const _did=t.id;tasks=tasks.filter(x=>x.id!==_did);if(SB_ENABLED&&SB_USER)sbDeleteTask(_did).catch(()=>{});sv();refresh();
     });
-
-    // ── 時刻正規化（"720"→"07:20", "0720"→"07:20", "7:2"→"07:02" など） ──
-    function normalizeTime(raw){
-      if(!raw||!raw.trim())return null;
-      const s=raw.trim();
-      // HH:MM 形式
-      if(/^\d{1,2}:\d{2}$/.test(s)){
-        const [h,m]=s.split(':').map(Number);
-        if(h>=0&&h<=23&&m>=0&&m<=59)return pad(h)+':'+pad(m);
-        return null;
-      }
-      // 数字のみ
-      const digits=s.replace(/\D/g,'');
-      if(digits.length===3){const h=Number(digits[0]),m=Number(digits.slice(1));if(h<=9&&m<=59)return pad(h)+':'+pad(m);}
-      if(digits.length===4){const h=Number(digits.slice(0,2)),m=Number(digits.slice(2));if(h<=23&&m<=59)return pad(h)+':'+pad(m);}
-      if(digits.length===1||digits.length===2){const h=Number(digits);if(h>=0&&h<=23)return pad(h)+':00';}
-      return null;
-    }
 
     // ── インライン時刻編集 ──
     // blur は「Escキャンセル後」には発火させない
@@ -1705,6 +1754,23 @@ function initApp(){
   document.getElementById('sd-stop').addEventListener('click',stopTask);
   document.getElementById('sd-next').addEventListener('click',nextTask);
   document.getElementById('sd-cancel').addEventListener('click',cancelTask);
+  // 稼働中タスクの開始時刻編集
+  document.getElementById('sd-start').addEventListener('click',openActiveStartEdit);
+  const sdInp=document.getElementById('sd-start-inp');
+  sdInp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();commitActiveStart();}
+    if(e.key==='Escape'){
+      sdInp.dataset.aborted='1';closeActiveStartEdit();
+      document.getElementById('sd-err').classList.remove('show');
+    }
+  });
+  sdInp.addEventListener('blur',()=>{
+    setTimeout(()=>{
+      if(sdInp.dataset.aborted==='1')return;
+      if(!sdInp.classList.contains('show'))return;
+      commitActiveStart();
+    },150);
+  });
   document.getElementById('edit-cancel').addEventListener('click',closeModal);
   document.getElementById('edit-save').addEventListener('click',saveEdit);
   document.getElementById('modal-ov').addEventListener('click',e=>{if(e.target===document.getElementById('modal-ov'))closeModal();});
@@ -1784,7 +1850,14 @@ function addP(){
       <button class="sd-act" id="sd-next" title="停止して次のタスクを開始">⏭ 次へ</button>
       <button class="sd-act" id="sd-cancel" title="記録せずに取り消す">↩ 取り消し</button>
     </div>
-    <div id="sd-meta"></div>
+    <div id="sd-meta">
+      <span id="sd-genre"></span>
+      <span id="sd-start-lbl">開始</span>
+      <button id="sd-start" title="クリックして開始時刻を修正">--:--</button>
+      <input id="sd-start-inp" type="text" inputmode="numeric" placeholder="09:30">
+      <span id="sd-start-suffix">〜</span>
+    </div>
+    <div id="sd-err"></div>
   </div>
 </div>
 
