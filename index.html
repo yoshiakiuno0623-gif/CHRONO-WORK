@@ -1136,7 +1136,7 @@ let logDate=tid();
 function hmToDate(dateStr, hm){
   if(!hm)return null;
   // "720"→"07:20"、"930"→"09:30" の自動正規化（念のため二重対応）
-  let t2=hm;
+  let t2=toHalfWidth(hm);
   if(!t2.includes(':')){
     const d2=t2.replace(/\D/g,'');
     if(d2.length===3)t2=d2[0]+':'+d2.slice(1);
@@ -1153,11 +1153,22 @@ function hmToDate(dateStr, hm){
 }
 function dateToHM(d){ return pad(new Date(d).getHours())+':'+pad(new Date(d).getMinutes()); }
 
+// ── 全角→半角（日本語IMEのまま数字を打つと "０９３０" になり弾かれるため） ──
+// 全角数字０-９・全角コロン／全角スペース・全角ピリオドを半角に寄せる
+function toHalfWidth(s){
+  return String(s)
+    .replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0))
+    .replace(/[：﹕]/g,':')
+    .replace(/[　]/g,' ')
+    .replace(/[．。]/g,'.');
+}
+
 // ── 時刻正規化（"720"→"07:20", "0720"→"07:20", "7:2"→"07:02" など） ──
 // ログ行の編集と稼働中タスクの開始時刻編集で共用する
 function normalizeTime(raw){
-  if(!raw||!raw.trim())return null;
-  const s=raw.trim();
+  if(!raw)return null;
+  const s=toHalfWidth(raw).trim();
+  if(!s)return null;
   // HH:MM 形式
   if(/^\d{1,2}:\d{2}$/.test(s)){
     const [h,m]=s.split(':').map(Number);
