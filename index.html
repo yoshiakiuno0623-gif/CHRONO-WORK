@@ -510,7 +510,10 @@ async function sbSignUp(email, pass){
   return error;
 }
 async function sbSignInGoogle(){
-  const {error} = await SB.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.href}});
+  // 戻り先はクエリ・ハッシュを除いた素のURLにする。
+  // location.href をそのまま渡すと、前回失敗時の ?error=... が戻り先に引き継がれ、
+  // 成功時の ?code=... と同居して supabase-js が error を優先→永遠にログインできないループになる
+  const {error} = await SB.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+location.pathname}});
   return error;
 }
 async function sbSignOut(){
@@ -597,6 +600,18 @@ function showLoginUI(){
   const ov=document.getElementById('login-ov');
   ov.style.display='flex';
   const lerr=document.getElementById('l-err');
+  // OAuthの戻りで ?error=... が付いていたら日本語で表示し、URLから取り除く
+  // （残したままだと次のログイン試行が同じエラー扱いになり、抜け出せなくなる）
+  const qp=new URLSearchParams(location.search);
+  if(qp.has('error')||qp.has('error_description')){
+    const code=qp.get('error_code')||qp.get('error')||'';
+    const desc=qp.get('error_description')||'';
+    const msg=/state parameter missing|bad_oauth_callback/i.test(code+' '+desc)
+      ?'Googleログインの途中で状態が途切れました。もう一度「Googleでログイン」を押してください。'
+      :'ログインに失敗しました: '+desc.replace(/\+/g,' ');
+    lerr.textContent=msg;lerr.style.display='block';
+    history.replaceState(null,'',location.origin+location.pathname);
+  }
   document.getElementById('l-signin').addEventListener('click',async()=>{
     const e=document.getElementById('l-email').value.trim();
     const p=document.getElementById('l-pass').value;
