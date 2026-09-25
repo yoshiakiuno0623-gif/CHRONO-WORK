@@ -204,7 +204,7 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
 #prev-cnt{font-size:18px;font-weight:700;font-family:'JetBrains Mono',monospace}
 
 /* SUMMARY */
-#sum-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+#sum-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
 .scard{border-radius:8px;padding:14px 14px;border:1px solid var(--border)}
 .sval{font-size:20px;font-weight:700;font-family:'JetBrains Mono',monospace;letter-spacing:.02em}
 .ssub{font-size:10px;color:var(--slate);margin-top:2px}
@@ -274,7 +274,6 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
 /* MOBILE */
 @media(max-width:480px){
   #sum-grid{grid-template-columns:1fr 1fr}
-  #sum-grid .scard:last-child{grid-column:span 2}
   .sval{font-size:18px}
   #exp-row{flex-direction:column}
   #exp-row .dg{width:100%}
@@ -445,6 +444,7 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
       </div>
       <div class="scard"><div class="slbl" style="margin-bottom:4px">TASKS</div><div class="sval" id="s-tasks">0</div><div class="ssub" id="s-tasks-sub">件</div></div>
       <div class="scard"><div class="slbl" style="margin-bottom:4px">DAYS</div><div class="sval" id="s-time" style="color:var(--text-mid)">0</div><div class="ssub">活動日数</div></div>
+      <div class="scard" style="background:rgba(16,185,129,.05);border-color:rgba(16,185,129,.18)"><div class="slbl" style="margin-bottom:4px">AVG / DAY</div><div class="sval" id="s-avg" style="color:#34D399">00:00</div><div class="ssub" id="s-avg-sub">稼働日あたり</div></div>
     </div>
     <!-- BREAKDOWN -->
     <div style="background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:12px">
@@ -1531,6 +1531,9 @@ function renderSum(){
   document.getElementById('s-tasks').textContent=rangeTasks.filter(t=>t.id).length+(incActive?1:0);
   document.getElementById('s-tasks-sub').textContent='件';
   document.getElementById('s-time').textContent=activeDays;
+  // 1日平均：記録のある日（稼働日）で割る。土日など記録ゼロの日は分母に入れない
+  document.getElementById('s-avg').textContent=fd(activeDays?tot/activeDays:0);
+  document.getElementById('s-avg-sub').textContent=activeDays?`稼働日あたり（${activeDays}日）`:'稼働日あたり';
   // BREAKDOWN
   const ts={};
   rangeTasks.forEach(t=>{ts[t.genre]=(ts[t.genre]||0)+t.duration;});
