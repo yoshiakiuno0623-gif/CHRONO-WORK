@@ -147,6 +147,16 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
 #add-form.show{display:block}
 #add-form-row{display:flex;gap:8px;flex-wrap:wrap}
 
+/* 手入力の記録追加（LOGタブ） */
+#mr-form{display:none;background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:8px;padding:14px;margin-top:12px}
+#mr-form.show{display:block}
+.mr-row{display:flex;gap:8px;flex-wrap:wrap}
+.mr-time{width:88px;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
+#mr-dur{font-size:14px;font-weight:700;color:var(--text-mid);font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;padding:9px 0}
+#mr-dur.ok{color:var(--amber)}
+#mr-err{display:none;font-size:11px;color:#F87171;margin-top:8px}
+#mr-err.show{display:block}
+
 /* LOG ── TaskChute風インライン時刻編集 */
 .lrow{display:flex;align-items:center;padding:10px 10px;border-bottom:1px solid rgba(100,116,139,.07);gap:8px;transition:background .12s;flex-wrap:wrap}
 .lrow:hover{background:rgba(255,255,255,.02)}
@@ -281,6 +291,8 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
   #exp-row .btn{width:100%}
   #add-form-row{flex-direction:column}
   #add-form-row .inp,#add-form-row .btn{width:100%}
+  #mr-row1{flex-direction:column}
+  #mr-row1 .inp{width:100%}
 }
 </style>
 </head>
@@ -389,6 +401,29 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
     </div>
     <div id="log-date-summary" style="display:none;margin-bottom:10px"></div>
     <div id="log-wrap"></div>
+    <!-- 手入力で記録を追加（表示中の日付に追加される） -->
+    <div style="margin-top:12px">
+      <button class="btn btn-a" id="mr-show">＋ この日に記録を追加</button>
+    </div>
+    <div id="mr-form">
+      <div class="slbl" id="mr-title">─── 記録を追加 ───</div>
+      <div class="mr-row" id="mr-row1">
+        <select class="inp" id="mr-preset" style="flex:1;min-width:150px"></select>
+        <input class="inp" id="mr-name" placeholder="タスク名" style="flex:1;min-width:140px;display:none">
+        <select class="inp" id="mr-genre" style="min-width:114px"></select>
+      </div>
+      <div class="mr-row" style="margin-top:8px;align-items:flex-end">
+        <div class="dg"><label>開始</label><input class="inp mr-time" id="mr-start" type="text" inputmode="numeric" placeholder="09:30"></div>
+        <div style="font-size:14px;color:var(--slate-dim);padding-bottom:9px">→</div>
+        <div class="dg"><label>終了</label><input class="inp mr-time" id="mr-end" type="text" inputmode="numeric" placeholder="11:00"></div>
+        <div class="dg"><label>作業時間</label><div id="mr-dur">--:--</div></div>
+        <div style="display:flex;gap:8px;margin-left:auto">
+          <button class="btn btn-a" id="mr-add">追加</button>
+          <button class="btn btn-g" id="mr-cancel">キャンセル</button>
+        </div>
+      </div>
+      <div id="mr-err"></div>
+    </div>
   </div>
 
   <!-- EXPORT -->
@@ -1201,6 +1236,11 @@ function normalizeTime(raw){
 function renderLog(){
   const el=document.getElementById('log-wrap');
   document.getElementById('log-date').value=logDate;
+  // 追加フォームを開いたまま日付を移動したら、見出しと作業時間を新しい日付で引き直す
+  if(document.getElementById('mr-form').classList.contains('show')){
+    document.getElementById('mr-title').textContent=`─── ${mrDateLabel()} に記録を追加 ───`;
+    previewManualDur();
+  }
   const isToday=logDate===tid();
   document.getElementById('log-next').disabled=isToday;
   document.getElementById('log-next').style.opacity=isToday?.35:1;
@@ -1441,6 +1481,77 @@ function makeLogRow(t,refresh){
 
     return row;
 }
+// ── 手入力で記録を追加（LOGタブで表示中の日付に追加。計測し忘れた日の後付け用） ──
+function mrDateLabel(){
+  return new Date(logDate+'T12:00:00').toLocaleDateString('ja-JP',{month:'long',day:'numeric',weekday:'short'});
+}
+function openManualForm(){
+  const sel=document.getElementById('mr-preset');
+  sel.innerHTML=presets.map(p=>`<option value="${p.id}" style="background:#060C18">${eh(p.name)}</option>`).join('')
+    +'<option value="__free" style="background:#060C18">（タスク名を手入力）</option>';
+  fs(document.getElementById('mr-genre'),presets[0]?presets[0].genre:'');
+  document.getElementById('mr-name').value='';
+  document.getElementById('mr-start').value='';
+  document.getElementById('mr-end').value='';
+  document.getElementById('mr-title').textContent=`─── ${mrDateLabel()} に記録を追加 ───`;
+  document.getElementById('mr-err').classList.remove('show');
+  syncManualPreset();previewManualDur();
+  document.getElementById('mr-form').classList.add('show');
+  document.getElementById('mr-show').style.display='none';
+  setTimeout(()=>document.getElementById('mr-start').focus(),0);
+}
+function closeManualForm(){
+  document.getElementById('mr-form').classList.remove('show');
+  document.getElementById('mr-show').style.display='';
+}
+// プリセットを選ぶとジャンルを自動でそろえる。「手入力」を選んだときだけタスク名欄を出す
+function syncManualPreset(){
+  const v=document.getElementById('mr-preset').value,nm=document.getElementById('mr-name');
+  if(v==='__free'){nm.style.display='';return;}
+  nm.style.display='none';
+  const p=presets.find(x=>x.id===v);
+  if(p)fs(document.getElementById('mr-genre'),p.genre);
+}
+// 開始・終了を正規化して日時にする（全角・略記OK）。終了が開始以前ならエラー文言を返す
+function readManualTimes(){
+  const ns=normalizeTime(document.getElementById('mr-start').value);
+  const ne=normalizeTime(document.getElementById('mr-end').value);
+  if(!ns)return{err:'開始時刻を入力してください（例: 0930 または 09:30）'};
+  if(!ne)return{err:'終了時刻を入力してください（例: 1100 または 11:00）'};
+  const sd=hmToDate(logDate,ns),ed=hmToDate(logDate,ne);
+  if(!sd||!ed||isNaN(sd)||isNaN(ed))return{err:'時刻変換エラー'};
+  if(ed<=sd)return{err:'終了は開始より後にしてください'};
+  if(ed.getTime()>Date.now())return{err:'未来の時刻は登録できません'};
+  return{sd,ed};
+}
+function previewManualDur(){
+  const el=document.getElementById('mr-dur'),r=readManualTimes();
+  if(r.err){el.textContent='--:--';el.classList.remove('ok');return;}
+  el.textContent=fd(r.ed-r.sd);el.classList.add('ok');
+}
+function addManualRecord(){
+  const err=document.getElementById('mr-err');
+  const pv=document.getElementById('mr-preset').value;
+  const p=pv==='__free'?null:presets.find(x=>x.id===pv);
+  const name=p?p.name:document.getElementById('mr-name').value.trim();
+  if(!name){err.textContent='タスク名を入力してください';err.classList.add('show');return;}
+  const r=readManualTimes();
+  if(r.err){err.textContent=r.err;err.classList.add('show');return;}
+  err.classList.remove('show');
+  const now=Date.now();
+  tasks.push({
+    id:'t_'+now+'_'+Math.random().toString(36).slice(2,7),
+    presetId:p?p.id:null,name,genre:document.getElementById('mr-genre').value,
+    startTime:r.sd.getTime(),startDate:r.sd.toISOString(),
+    endTime:r.ed.getTime(),endDate:r.ed.toISOString(),duration:r.ed-r.sd
+  });
+  // tasksは新しい順で保持しているので、過去日を足したら開始時刻の降順に並べ直す
+  tasks.sort((a,b)=>new Date(b.startDate)-new Date(a.startDate));
+  sv();
+  closeManualForm();
+  renderLog();renderTbar();renderTodayLog();renderPL();ubadge();flash();
+}
+
 function shiftLogDate(delta){
   const d=new Date(logDate+'T12:00:00');
   d.setDate(d.getDate()+delta);
@@ -1813,6 +1924,17 @@ function initApp(){
   document.getElementById('log-prev').addEventListener('click',()=>shiftLogDate(-1));
   document.getElementById('log-next').addEventListener('click',()=>shiftLogDate(1));
   document.getElementById('log-today-btn').addEventListener('click',()=>{logDate=tid();renderLog();});
+  // 手入力の記録追加
+  document.getElementById('mr-show').addEventListener('click',openManualForm);
+  document.getElementById('mr-cancel').addEventListener('click',closeManualForm);
+  document.getElementById('mr-add').addEventListener('click',addManualRecord);
+  document.getElementById('mr-preset').addEventListener('change',syncManualPreset);
+  ['mr-start','mr-end'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.addEventListener('input',previewManualDur);
+    el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();addManualRecord();}});
+  });
+  document.getElementById('mr-name').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();addManualRecord();}});
   document.getElementById('log-date').addEventListener('change',e=>{
     if(e.target.value>tid())return;
     logDate=e.target.value;renderLog();
