@@ -108,10 +108,13 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
 
 /* TODAY BAR */
 #tbar{display:none;align-items:center;gap:10px;padding:8px 12px;background:rgba(0,0,0,.2);border:1px solid rgba(100,116,139,.1);border-radius:6px;margin-bottom:12px}
-#tbar.show{display:flex}
+#tbar.show{display:flex;flex-wrap:wrap}
+#tbar-grp{display:flex;gap:14px;flex-wrap:wrap;padding-left:12px;border-left:1px solid rgba(100,116,139,.2)}
+.tg-lbl{font-size:9px;color:var(--slate);letter-spacing:.06em;white-space:nowrap}
+.tg-val{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;font-family:'JetBrains Mono',monospace;color:var(--text-mid)}
 #tbar-lbl{font-size:9px;color:var(--slate);letter-spacing:.12em}
 #tbar-total{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;font-family:'JetBrains Mono',monospace}
-#gbar{flex:1;height:4px;display:flex;gap:2px}
+#gbar{flex:1;min-width:60px;height:4px;display:flex;gap:2px}
 .gbseg{height:100%;border-radius:2px;transition:width .3s}
 #tbar-cnt{font-size:10px;color:var(--slate);white-space:nowrap}
 
@@ -331,11 +334,17 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
 <!-- GENRE EDITOR -->
 <div id="ged-wrap">
   <div style="max-width:700px;margin:0 auto">
-    <div class="slbl" style="color:#818CF8;margin-bottom:8px">─── GENRE SETTINGS ───</div>
+    <div class="slbl" style="color:#818CF8;margin-bottom:4px">─── GENRE SETTINGS ───</div>
+    <div style="font-size:10px;color:var(--slate);margin-bottom:6px">大分類・小分類とも名前をクリックで変更 ／ ●で色を変更 ／ 右の選択欄で大分類を付け替え ／ ✕で削除（中身があるときは移動先を選んで削除）</div>
     <div id="glist"></div>
     <div id="ged-row" style="margin-top:10px">
-      <input class="inp" id="ginput" placeholder="新しいジャンルを追加..." style="flex:1">
+      <select class="inp" id="gparent" style="max-width:130px" title="追加先の大分類"></select>
+      <input class="inp" id="ginput" placeholder="新しい小分類を追加..." style="flex:1">
       <button class="btn btn-g" id="gadd-btn" style="border-color:#6366F1;color:#6366F1">ADD</button>
+    </div>
+    <div id="ged-row2" style="margin-top:8px;display:flex;gap:8px">
+      <input class="inp" id="grinput" placeholder="新しい大分類を追加..." style="flex:1">
+      <button class="btn btn-g" id="gradd-btn" style="border-color:#818CF8;color:#818CF8">ADD</button>
     </div>
   </div>
 </div>
@@ -365,6 +374,7 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
   <div class="view on" id="v-tasks">
     <div id="tbar">
       <div><div id="tbar-lbl">TODAY</div><div id="tbar-total">00:00</div></div>
+      <div id="tbar-grp"></div>
       <div id="gbar"></div>
       <div id="tbar-cnt"></div>
     </div>
@@ -529,6 +539,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const SB_ENABLED = !!(SUPABASE_URL && SUPABASE_KEY);
 let SB = null;
 let SB_USER = null;
+let SB_NO_PARENT = false;
 
 if(SB_ENABLED){
   // sb_publishable_ 形式・eyJhbGci 形式どちらも supabase-js v2 で動作します
@@ -578,7 +589,12 @@ async function sbLoad(){
       }));
     }
     if(gr.data.length>0){
-      genres=gr.data.map(r=>({id:r.id,label:r.label,color:r.color}));
+      // 大分類は genres 表に id が grp_ で始まる行として入れている。parent_id 列が未作成の間は端末内の記録で親を補う
+      const lsParent={};genres.forEach(g=>{if(g.parent)lsParent[g.id]=g.parent;});
+      const gRowsG=gr.data.filter(r=>r.id.startsWith('grp_')),gRowsS=gr.data.filter(r=>!r.id.startsWith('grp_'));
+      if(gRowsG.length)groups=gRowsG.map(r=>({id:r.id,label:r.label}));
+      genres=gRowsS.map(r=>({id:r.id,label:r.label,color:r.color,parent:r.parent_id||lsParent[r.id]||null}));
+      ngrp();
     }
     if(pr.data.length>0){
       presets=pr.data.map(r=>({id:r.id,name:r.name,genre:r.genre}));
@@ -587,6 +603,7 @@ async function sbLoad(){
     try{
       localStorage.setItem(LS_T,JSON.stringify(tasks));
       localStorage.setItem(LS_G,JSON.stringify(genres));
+      localStorage.setItem(LS_GR,JSON.stringify(groups));
       localStorage.setItem(LS_P,JSON.stringify(presets));
     }catch(e){}
     return true;
@@ -604,13 +621,26 @@ async function sbSave(){
       start_date:t.startDate, end_date:t.endDate||null, duration:t.duration,
     }));
     // genres
-    const gRows=genres.map((g,i)=>({id:g.id,user_id:uid,label:g.label,color:g.color,sort_order:i}));
+    const gRows=[
+      ...groups.map((g,i)=>({id:g.id,user_id:uid,label:g.label,color:'#64748B',sort_order:i,parent_id:null})),
+      ...genres.map((g,i)=>({id:g.id,user_id:uid,label:g.label,color:g.color,sort_order:groups.length+i,parent_id:g.parent||null})),
+    ];
     // presets
     const pRows=presets.map((p,i)=>({id:p.id,user_id:uid,name:p.name,genre:p.genre,sort_order:i}));
+    // parent_id 列がまだ無いDBでは、列を外して保存し直す（大分類の所属はこの端末にだけ残る）
+    const saveGenres=async()=>{
+      const rows=SB_NO_PARENT?gRows.map(({parent_id,...r})=>r):gRows;
+      const res=await SB.from('genres').upsert(rows,{onConflict:'id'});
+      if(res.error&&!SB_NO_PARENT&&/parent_id/.test(res.error.message||'')){
+        SB_NO_PARENT=true;console.warn('genres.parent_id 列が未作成のため、大分類の所属は端末内のみに保存します');
+        return saveGenres();
+      }
+      if(res.error)console.error('genres save error',res.error);
+    };
 
     await Promise.all([
       tRows.length?SB.from('tasks').upsert(tRows,{onConflict:'id'}):Promise.resolve(),
-      SB.from('genres').upsert(gRows,{onConflict:'id'}),
+      saveGenres(),
       SB.from('presets').upsert(pRows,{onConflict:'id'}),
     ]);
   }catch(e){console.error('sbSave exception',e);}
@@ -797,7 +827,7 @@ async function migrateLocalToSB(){
   }catch(e){console.warn('migrate error',e);}
 }
 
-const LS_T='cw2-tasks', LS_G='cw2-genres', LS_P='cw2-presets', LS_A='cw2-active', LS_DS='cw2-daystart';
+const LS_T='cw2-tasks', LS_G='cw2-genres', LS_GR='cw2-groups', LS_P='cw2-presets', LS_A='cw2-active', LS_DS='cw2-daystart';
 // 1日の開始時刻（0〜11）。0なら日付が変わった瞬間が1日の境目。
 // 例: 4にすると深夜2時の作業は「前日」に集計される（日をまたぐ作業が2日に割れない）
 let dayStartHour=(()=>{try{const v=parseInt(localStorage.getItem(LS_DS),10);return(v>=0&&v<=11)?v:0;}catch{return 0;}})();
@@ -831,6 +861,14 @@ let tasks  =(()=>{
   }catch{return[];}
 })();
 let genres =(()=>{try{return JSON.parse(localStorage.getItem(LS_G)||'null')||DG;}catch{return DG;}})();
+// 大分類。小分類（genres）は parent で大分類にぶら下がる
+let groups =(()=>{try{return JSON.parse(localStorage.getItem(LS_GR)||'null')||[];}catch{return[];}})();
+// 大分類が無い・親が消えた小分類は先頭の大分類へ寄せる（初回は「アンドエル」を作って全件入れる）
+function ngrp(){
+  if(!groups.length)groups=[{id:'grp_andl',label:'アンドエル'}];
+  genres=genres.map(g=>groups.find(x=>x.id===g.parent)?g:{...g,parent:groups[0].id});
+}
+ngrp();
 let presets=(()=>{try{return JSON.parse(localStorage.getItem(LS_P)||'null')||DP;}catch{return DP;}})();
 let active=null, elapsed=0, timerID=null, editPID=null, curView='tasks';
 // リロード時: 計測中だったactiveを復元（またはtasksに組み込む）
@@ -859,6 +897,7 @@ function sv(){
   try{
     localStorage.setItem(LS_T,JSON.stringify(tasks));
     localStorage.setItem(LS_G,JSON.stringify(genres));
+    localStorage.setItem(LS_GR,JSON.stringify(groups));
     localStorage.setItem(LS_P,JSON.stringify(presets));
     if(active){localStorage.setItem(LS_A,JSON.stringify({...active,_elapsed:Date.now()-active.startTime}));}
     else{localStorage.removeItem(LS_A);}
@@ -867,6 +906,7 @@ function sv(){
   if(SB_ENABLED&&SB_USER) sbSave().catch(e=>console.warn('sbSave fail',e));
 }
 function gbi(id){return genres.find(g=>g.id===id)||{id:"?",label:id,color:"#64748B"};}
+function grOf(gid){const g=genres.find(x=>x.id===gid);return groups.find(x=>g&&x.id===g.parent)||{id:'?',label:'未分類'};}
 function pc(p){return gbi(p.genre).color;}
 function pad(n){return String(n).padStart(2,'0');}
 function fd(ms){const s=Math.floor(ms/1e3),h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?`${h}:${pad(m)}:${pad(sc)}`:`${pad(m)}:${pad(sc)}`;}
@@ -881,7 +921,7 @@ function dstr(d){const t=new Date(d);t.setHours(t.getHours()-dayStartHour);retur
 function tid(){return dstr(new Date());}
 function ttasks(){return tasks.filter(t=>dstr(t.startDate)===tid());}
 function eh(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-function bdg(g){if(!g)return'';return`<span class="gbadge" style="background:${g.color}15;border:1px solid ${g.color}35;color:${g.color}"><span class="gbdot" style="background:${g.color}"></span>${eh(g.label)}</span>`;}
+function bdg(g){if(!g)return'';const pre=groups.length>1&&genres.includes(g)?`<span style="opacity:.65">${eh(grOf(g.id).label)} › </span>`:'';return`<span class="gbadge" style="background:${g.color}15;border:1px solid ${g.color}35;color:${g.color}"><span class="gbdot" style="background:${g.color}"></span>${pre}${eh(g.label)}</span>`;}
 
 // CLOCK
 function clk(){
@@ -1571,7 +1611,12 @@ function renderTbar(){
   document.getElementById('tbar-cnt').textContent=(tt.length+(active?1:0))+' tasks';
   const gb=document.getElementById('gbar');gb.innerHTML='';
   const ts={};all.forEach(t=>{ts[t.genre]=(ts[t.genre]||0)+t.duration;});
-  genres.forEach(g=>{if(!ts[g.id])return;const s=document.createElement('div');s.className='gbseg';s.style.cssText=`width:${(ts[g.id]/tot)*100}%;background:${g.color}`;s.title=`${g.label}: ${fd(ts[g.id])}`;gb.appendChild(s);});
+  // 大分類ごとの合計を全体の合計の横に並べる
+  document.getElementById('tbar-grp').innerHTML=groups.map(gr=>{
+    const v=genres.filter(g=>g.parent===gr.id).reduce((a,g)=>a+(ts[g.id]||0),0);
+    return`<div><div class="tg-lbl">${eh(gr.label)}</div><div class="tg-val"${v?'':' style="opacity:.4"'}>${fd(v)}</div></div>`;
+  }).join('');
+  groups.flatMap(gr=>genres.filter(g=>g.parent===gr.id)).forEach(g=>{if(!ts[g.id])return;const s=document.createElement('div');s.className='gbseg';s.style.cssText=`width:${(ts[g.id]/tot)*100}%;background:${g.color}`;s.title=`${g.label}: ${fd(ts[g.id])}`;gb.appendChild(s);});
 }
 
 // EXPORT
@@ -1600,8 +1645,8 @@ function expCSV(){
   const f=document.getElementById('exp-from').value,t=document.getElementById('exp-to').value;
   const rows=[...tasks].filter(x=>{const k=dstr(x.startDate);return k>=f&&k<=t;}).reverse();
   if(!rows.length){alert('該当データがありません');return;}
-  const bom='\uFEFF',hdr='日付,タスク名,ジャンル,開始時刻,終了時刻,経過時間(HH:MM:SS),経過時間(秒)';
-  const lines=rows.map(t=>{const g=gbi(t.genre),sd=new Date(t.startDate),ed=t.endDate?new Date(t.endDate):null;return[dstr(sd),`"${t.name.replace(/"/g,'""')}"`,g.label,sd.toLocaleString('ja-JP'),ed?ed.toLocaleString('ja-JP'):'',fhms(t.duration),Math.floor(t.duration/1e3)].join(',');});
+  const bom='\uFEFF',hdr='日付,タスク名,大分類,ジャンル,開始時刻,終了時刻,経過時間(HH:MM:SS),経過時間(秒)';
+  const lines=rows.map(t=>{const g=gbi(t.genre),sd=new Date(t.startDate),ed=t.endDate?new Date(t.endDate):null;return[dstr(sd),`"${t.name.replace(/"/g,'""')}"`,grOf(t.genre).label,g.label,sd.toLocaleString('ja-JP'),ed?ed.toLocaleString('ja-JP'):'',fhms(t.duration),Math.floor(t.duration/1e3)].join(',');});
   const blob=new Blob([bom+[hdr,...lines].join('\n')],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
   Object.assign(document.createElement('a'),{href:url,download:`chrono-work_${document.getElementById('exp-from').value}_${document.getElementById('exp-to').value}.csv`}).click();
@@ -1648,10 +1693,12 @@ function renderSum(){
   // BREAKDOWN
   const ts={};
   rangeTasks.forEach(t=>{ts[t.genre]=(ts[t.genre]||0)+t.duration;});
-  const bk=document.getElementById('bk-rows'),ag=genres.filter(g=>ts[g.id]).sort((a,b)=>ts[b.id]-ts[a.id]);
+  const bk=document.getElementById('bk-rows');
+  // 大分類ごとにまとめ、その下に小分類を時間の長い順に並べる
+  const gts=groups.map(gr=>{const kids=genres.filter(g=>g.parent===gr.id&&ts[g.id]).sort((a,b)=>ts[b.id]-ts[a.id]);return{gr,kids,t:kids.reduce((a,g)=>a+ts[g.id],0)};}).filter(x=>x.t).sort((a,b)=>b.t-a.t);
   document.getElementById('bk-title').textContent='─── BREAKDOWN ───';
-  if(!ag.length){bk.innerHTML='<div style="color:var(--slate-dim);font-size:12px;text-align:center;padding:12px">データなし</div>';}
-  else{bk.innerHTML=ag.map(g=>{const t=ts[g.id]||0,p=tot?(t/tot)*100:0;return`<div class="bkrow"><div class="bkh"><div class="bkl"><div class="bkdot" style="background:${g.color}"></div><span class="bkn">${eh(g.label)}</span></div><div class="bkr"><span class="bkpct">${p.toFixed(0)}%</span><span class="bkd">${fd(t)}</span></div></div><div class="bkbg"><div class="bkfg" style="width:${p}%;background:${g.color}"></div></div></div>`;}).join('');}
+  if(!gts.length){bk.innerHTML='<div style="color:var(--slate-dim);font-size:12px;text-align:center;padding:12px">データなし</div>';}
+  else{bk.innerHTML=gts.map(({gr,kids,t:gt})=>{const gp=tot?(gt/tot)*100:0;return`<div class="bkrow" style="margin-top:6px"><div class="bkh"><div class="bkl"><span class="bkn" style="font-weight:700;color:var(--text)">${eh(gr.label)}</span></div><div class="bkr"><span class="bkpct">${gp.toFixed(0)}%</span><span class="bkd">${fd(gt)}</span></div></div></div>`+kids.map(g=>{const t=ts[g.id]||0,p=tot?(t/tot)*100:0;return`<div class="bkrow" style="padding-left:12px"><div class="bkh"><div class="bkl"><div class="bkdot" style="background:${g.color}"></div><span class="bkn">${eh(g.label)}</span></div><div class="bkr"><span class="bkpct">${p.toFixed(0)}%</span><span class="bkd">${fd(t)}</span></div></div><div class="bkbg"><div class="bkfg" style="width:${p}%;background:${g.color}"></div></div></div>`;}).join('');}).join('');}
   // DAILY TREND (1日より長い期間のみ)
   const trc=document.getElementById('trend-card');
   if(sumDays!==0){
@@ -1700,7 +1747,46 @@ const GENRE_SWATCHES=['#F59E0B','#10B981','#6366F1','#EC4899','#0EA5E9','#F97316
 function rg(){
   const el=document.getElementById('glist');
   el.innerHTML='';
-  genres.forEach(g=>{
+  groups.forEach(gr=>{
+    rgHead(el,gr);
+    genres.filter(g=>g.parent===gr.id).forEach(g=>rgRow(el,g));
+  });
+  fs2(document.getElementById('gparent'));
+}
+// 大分類の見出し行（名前クリックで変更・✕で削除。中に小分類があれば移動先を選ぶ）
+function rgHead(el,gr){
+  const kids=genres.filter(g=>g.parent===gr.id);
+  const row=document.createElement('div');
+  row.style.cssText='display:flex;align-items:center;gap:8px;padding:12px 0 6px;border-bottom:1px solid rgba(129,140,248,.25)';
+  row.innerHTML=`<span style="font-size:13px;font-weight:700;color:var(--text);cursor:pointer;flex:1" title="クリックして名前を変更">${eh(gr.label)}</span><span style="font-size:10px;color:var(--slate)">小分類 ${kids.length}</span>`;
+  row.firstChild.addEventListener('click',()=>{
+    const v=(prompt('大分類の名前',gr.label)||'').trim();
+    if(!v||v===gr.label)return;
+    groups=groups.map(x=>x.id===gr.id?{...x,label:v}:x);
+    sv();rg();rgs();renderPL();renderTbar();renderTodayLog();
+    if(curView==='log')renderLog();
+  });
+  const rm=document.createElement('button');
+  rm.textContent='✕';rm.style.cssText='background:none;border:none;color:#64748B;cursor:pointer;font-size:12px;padding:3px 5px;flex-shrink:0';
+  if(groups.length<=1)rm.style.display='none';
+  const moveRow=document.createElement('div');
+  moveRow.style.cssText='display:none;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 0 8px;font-size:11px;color:var(--text-mid)';
+  rm.addEventListener('click',()=>{
+    if(!kids.length){
+      if(confirm(`大分類「${gr.label}」を削除しますか？`))delGroup(gr.id,null);
+      return;
+    }
+    const others=groups.filter(x=>x.id!==gr.id);
+    moveRow.innerHTML=`<span>小分類${kids.length}件の移動先</span><select class="inp" style="padding:4px 8px;font-size:11px">${others.map(x=>`<option value="${x.id}" style="background:#060C18">${eh(x.label)}</option>`).join('')}</select><button class="btn" style="border-color:#EF4444;color:#EF4444;padding:4px 10px;font-size:11px">移して削除</button><button class="btn" style="padding:4px 10px;font-size:11px">キャンセル</button>`;
+    const [sel]=moveRow.getElementsByTagName('select'),[okB,ngB]=moveRow.getElementsByTagName('button');
+    okB.addEventListener('click',()=>delGroup(gr.id,sel.value));
+    ngB.addEventListener('click',()=>{moveRow.style.display='none';});
+    moveRow.style.display='flex';
+  });
+  row.appendChild(rm);
+  el.appendChild(row);el.appendChild(moveRow);
+}
+function rgRow(el,g){
     const row=document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(100,116,139,.07)';
     // カラー見本（クリックでピッカー展開）
@@ -1744,17 +1830,27 @@ function rg(){
     });
     // 削除ボタン
     const rm=document.createElement('button');
-    rm.textContent='✕';rm.style.cssText='background:none;border:none;color:#334155;cursor:pointer;font-size:12px;padding:3px 5px;transition:color .15s;flex-shrink:0';
+    rm.textContent='✕';rm.style.cssText='background:none;border:none;color:#64748B;cursor:pointer;font-size:12px;padding:3px 5px;transition:color .15s;flex-shrink:0';
     rm.addEventListener('mouseenter',()=>rm.style.color='#EF4444');
-    rm.addEventListener('mouseleave',()=>rm.style.color='#334155');
+    rm.addEventListener('mouseleave',()=>rm.style.color='#64748B');
     if(genres.length<=1)rm.style.display='none';
+    // 使用中の分類は、記録・タスクの移動先を選んでから削除する（消した分類のIDが残って表示が崩れるのを防ぐ）
+    const moveRow=document.createElement('div');
+    moveRow.style.cssText='display:none;align-items:center;gap:6px;flex-wrap:wrap;padding:0 0 8px 44px;font-size:11px;color:var(--text-mid)';
     rm.addEventListener('click',()=>{
-      if(confirm(`ジャンル「${g.label}」を削除しますか？`)){
-        const _gid=g.id;
-        genres=genres.filter(x=>x.id!==_gid);
-        if(SB_ENABLED&&SB_USER)sbDeleteGenre(_gid).catch(e=>console.warn('sbDeleteGenre fail',e));
-        sv();rg();rgs();renderPL();
+      const nT=tasks.filter(t=>t.genre===g.id).length+(active&&active.genre===g.id?1:0);
+      const nP=presets.filter(p=>p.genre===g.id).length;
+      if(!nT&&!nP){
+        if(confirm(`ジャンル「${g.label}」を削除しますか？`))delGenre(g.id,null);
+        return;
       }
+      const others=genres.filter(x=>x.id!==g.id);
+      moveRow.innerHTML=`<span>記録${nT}件・タスク${nP}件の移動先</span><select class="inp" style="padding:4px 8px;font-size:11px"></select><button class="btn" style="border-color:#EF4444;color:#EF4444;padding:4px 10px;font-size:11px">移して削除</button><button class="btn" style="padding:4px 10px;font-size:11px">キャンセル</button>`;
+      const [sel]=moveRow.getElementsByTagName('select'),[okB,ngB]=moveRow.getElementsByTagName('button');
+      fs(sel,others[0].id);sel.querySelector(`option[value="${g.id}"]`)?.remove();
+      okB.addEventListener('click',()=>delGenre(g.id,sel.value));
+      ngB.addEventListener('click',()=>{moveRow.style.display='none';});
+      moveRow.style.display='flex';
     });
     // スウォッチパネル（展開/折りたたみ）
     const panel=document.createElement('div');
@@ -1790,17 +1886,48 @@ function rg(){
       panel.style.display=open?'flex':'none';
       swatch.style.borderColor=open?'#fff':'rgba(255,255,255,.2)';
     });
-    row.appendChild(swatch);row.appendChild(lbl);row.appendChild(nameInp);row.appendChild(rm);
+    // 所属する大分類の付け替え
+    const grSel=document.createElement('select');
+    grSel.className='inp';grSel.title='大分類を変更';
+    grSel.style.cssText='padding:3px 6px;font-size:10px;max-width:120px;flex-shrink:0';
+    fs2(grSel,g.parent);
+    grSel.addEventListener('change',()=>{
+      genres=genres.map(x=>x.id===g.id?{...x,parent:grSel.value}:x);
+      sv();rg();rgs();renderPL();renderTbar();renderTodayLog();
+      if(curView==='log')renderLog();
+    });
+    row.style.paddingLeft='14px';
+    row.appendChild(swatch);row.appendChild(lbl);row.appendChild(nameInp);row.appendChild(grSel);row.appendChild(rm);
     el.appendChild(row);
+    el.appendChild(moveRow);
     // パネルは行の下に別要素として追加
     const panelRow=document.createElement('div');
-    panelRow.style.cssText='padding-left:30px';
+    panelRow.style.cssText='padding-left:44px';
     panelRow.appendChild(panel);
     el.appendChild(panelRow);
-  });
 }
-function fs(sel,cur){sel.innerHTML=genres.map(g=>`<option value="${g.id}" style="background:#060C18">${eh(g.label)}</option>`).join('');if(genres.find(g=>g.id===cur))sel.value=cur;}
-function rgs(){fs(document.getElementById('np-genre'),document.getElementById('np-genre').value);fs(document.getElementById('edit-genre'),document.getElementById('edit-genre').value);}
+// 大分類の選択肢
+function fs2(sel,cur){cur=cur||sel.value;sel.innerHTML=groups.map(g=>`<option value="${g.id}" style="background:#060C18">${eh(g.label)}</option>`).join('');if(groups.find(g=>g.id===cur))sel.value=cur;}
+function delGroup(gid,to){
+  if(to)genres=genres.map(g=>g.parent===gid?{...g,parent:to}:g);
+  groups=groups.filter(x=>x.id!==gid);
+  if(SB_ENABLED&&SB_USER)sbDeleteGenre(gid).catch(e=>console.warn('sbDeleteGenre fail',e));
+  sv();rg();rgs();renderPL();renderTbar();renderTodayLog();
+  if(curView==='log')renderLog();
+}
+function fs(sel,cur){sel.innerHTML=groups.map(gr=>`<optgroup label="${eh(gr.label)}" style="background:#060C18">${genres.filter(g=>g.parent===gr.id).map(g=>`<option value="${g.id}" style="background:#060C18">${eh(g.label)}</option>`).join('')}</optgroup>`).join('');if(genres.find(g=>g.id===cur))sel.value=cur;}
+function delGenre(gid,to){
+  if(to){
+    tasks=tasks.map(t=>t.genre===gid?{...t,genre:to}:t);
+    presets=presets.map(p=>p.genre===gid?{...p,genre:to}:p);
+    if(active&&active.genre===gid)active={...active,genre:to};
+  }
+  genres=genres.filter(x=>x.id!==gid);
+  if(SB_ENABLED&&SB_USER)sbDeleteGenre(gid).catch(e=>console.warn('sbDeleteGenre fail',e));
+  sv();rg();rgs();renderPL();renderAB();renderTodayLog();
+  if(curView==='log')renderLog();
+}
+function rgs(){['np-genre','edit-genre','mr-genre'].forEach(id=>{const s=document.getElementById(id);fs(s,s.value);});}
 function ubadge(){document.getElementById('rec-badge').textContent=tasks.length+' records';}
 function flash(){const b=document.getElementById('rec-badge');b.textContent='✓ SAVED';b.classList.add('flash');setTimeout(()=>{b.classList.remove('flash');ubadge();},1800);}
 
@@ -1877,6 +2004,8 @@ function initApp(){
   });
   document.getElementById('gadd-btn').addEventListener('click',addG);
   document.getElementById('ginput').addEventListener('keydown',e=>{if(e.key==='Enter')addG();});
+  document.getElementById('gradd-btn').addEventListener('click',addGr);
+  document.getElementById('grinput').addEventListener('keydown',e=>{if(e.key==='Enter')addGr();});
 
   document.getElementById('show-add-btn').addEventListener('click',()=>{
     document.getElementById('add-form').classList.add('show');
@@ -1977,8 +2106,15 @@ window.addEventListener('DOMContentLoaded',()=>initWithAuth());
 
 function addG(){
   const inp=document.getElementById('ginput'),l=inp.value.trim();if(!l)return;
-  genres.push({id:'g_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),label:l,color:EC[genres.length%EC.length]});
+  genres.push({id:'g_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),label:l,color:EC[genres.length%EC.length],parent:document.getElementById('gparent').value||groups[0].id});
   sv();inp.value='';rg();rgs();
+}
+function addGr(){
+  const inp=document.getElementById('grinput'),l=inp.value.trim();if(!l)return;
+  const id='grp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+  groups.push({id,label:l});
+  sv();inp.value='';rg();rgs();
+  document.getElementById('gparent').value=id;
 }
 function addP(){
   const n=document.getElementById('np-name').value.trim(),g=document.getElementById('np-genre').value;if(!n)return;
