@@ -94,7 +94,7 @@ body.running #main{padding-bottom:140px}
 /* INPUTS */
 .inp{background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:6px;padding:9px 12px;color:var(--text);font-size:13px;font-family:inherit;outline:none;transition:border-color .15s;-webkit-appearance:none;appearance:none}
 .inp:focus{border-color:rgba(245,158,11,.4)}
-.inp::placeholder{color:#1e2d45}
+.inp::placeholder{color:#7C8BA1}
 select.inp{cursor:pointer;background:rgba(6,12,24,.95)}
 input[type=date].inp{color-scheme:dark;cursor:pointer}
 .btn{padding:9px 14px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.06em;font-weight:700;transition:all .15s;border:1px solid;white-space:nowrap;-webkit-appearance:none}
@@ -1344,7 +1344,8 @@ function makeLogRow(t,refresh){
       <div class="lr-acc" style="background:${g.color}"></div>
       <div class="lr-name-wrap">
         <div class="lr-name">${eh(t.name)}</div>
-        <div class="lr-genre">${bdg(g)}</div>
+        <div class="lr-genre" title="クリックして分類を変更" style="cursor:pointer">${bdg(g)}</div>
+        <select class="inp lr-gsel" style="display:none;padding:3px 6px;font-size:11px;margin-top:2px;max-width:200px"></select>
       </div>
       <div class="lr-times">
         <div class="lr-tblock">
@@ -1369,6 +1370,19 @@ function makeLogRow(t,refresh){
         <button class="lr-replay" title="このタスクを再実行">▶</button>
         <button class="lr-del">✕</button>
       </div>`;
+
+    // ── 分類の変更（バッジをクリック→大分類つきの選択欄） ──
+    const gWrap=row.querySelector('.lr-genre'),gSel=row.querySelector('.lr-gsel');
+    gWrap.addEventListener('click',()=>{
+      fs(gSel,t.genre);
+      gWrap.style.display='none';gSel.style.display='block';gSel.focus();
+    });
+    gSel.addEventListener('change',()=>{
+      const v=gSel.value;
+      tasks=tasks.map(x=>x.id===t.id?{...x,genre:v}:x);
+      sv();refresh();
+    });
+    gSel.addEventListener('blur',()=>{gSel.style.display='none';gWrap.style.display='';});
 
     // ── 再実行 ──
     row.querySelector('.lr-replay').addEventListener('click',()=>{
