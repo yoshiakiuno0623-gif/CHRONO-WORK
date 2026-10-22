@@ -1230,7 +1230,17 @@ function saveEdit(){
   const n=document.getElementById('edit-name').value.trim(),gv=document.getElementById('edit-genre').value;
   if(!n)return;
   presets=presets.map(p=>p.id===editPID?{...p,name:n,genre:gv,color:null}:p);
-  sv();closeModal();renderPL();
+  // このタスクの記録で分類が違うものがあれば、まとめて付け替えるか確認する（記録は開始時の分類を持つため）
+  const pid=editPID,diff=tasks.filter(t=>t.presetId===pid&&t.genre!==gv),actDiff=active&&active.presetId===pid&&active.genre!==gv;
+  if(diff.length||actDiff){
+    const g=gbi(gv),nToday=diff.filter(t=>dstr(t.startDate)===tid()).length;
+    if(confirm(`このタスクのこれまでの記録 ${diff.length+(actDiff?1:0)}件（うち今日 ${nToday+(actDiff?1:0)}件）の分類も「${grOf(gv).label} › ${g.label}」に変えますか？\n\nキャンセルすると、これまでの記録はそのままで、これからの記録だけ新しい分類になります。`)){
+      tasks=tasks.map(t=>t.presetId===pid?{...t,genre:gv}:t);
+      if(actDiff)active={...active,genre:gv};
+    }
+  }
+  sv();closeModal();renderPL();renderAB();renderTbar();renderTodayLog();
+  if(curView==='log')renderLog();
 }
 
 // LOG
