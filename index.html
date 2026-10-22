@@ -31,7 +31,7 @@ body{min-height:100vh;background:linear-gradient(150deg,#05090F 0%,#09111E 50%,#
 .nav-btn.ind:hover,.nav-btn.ind.on{background:rgba(99,102,241,.1);border-color:var(--indigo);color:var(--indigo)}
 
 /* ACTIVE BAR */
-#active-bar{display:none;align-items:center;gap:10px;background:rgba(245,158,11,.05);border-bottom:1px solid rgba(245,158,11,.18);padding:10px 14px;position:sticky;top:49px;z-index:190;overflow:hidden}
+#active-bar{display:none;align-items:center;gap:10px;background:linear-gradient(rgba(245,158,11,.05),rgba(245,158,11,.05)),rgba(5,9,15,.96);border-bottom:1px solid rgba(245,158,11,.18);padding:10px 14px;position:sticky;top:49px;z-index:190;overflow:hidden}
 #active-bar.show{display:flex}
 #ab-scan{position:absolute;bottom:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(245,158,11,.5),transparent);animation:scan 2.4s linear infinite}
 #ab-accent{width:4px;height:36px;border-radius:2px;flex-shrink:0}
@@ -107,16 +107,17 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
 .btn-gr.done{background:rgba(16,185,129,.18);border-color:var(--green);color:var(--green)}
 
 /* TODAY BAR */
-#tbar{display:none;align-items:center;gap:10px;padding:8px 12px;background:rgba(0,0,0,.2);border:1px solid rgba(100,116,139,.1);border-radius:6px;margin-bottom:12px}
-#tbar.show{display:flex;flex-wrap:wrap}
-#tbar-grp{display:flex;gap:14px;flex-wrap:wrap;padding-left:12px;border-left:1px solid rgba(100,116,139,.2)}
+/* スクロールしてもヘッダー（計測中はアクティブバーも）の直下に固定 */
+#tbar{display:flex;flex-direction:column;gap:8px;padding:8px;background:rgba(7,12,22,.94);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(100,116,139,.15);border-radius:8px;margin-bottom:12px;position:sticky;top:var(--tbar-top,49px);z-index:150}
+#tbar-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:6px}
+.tcard{border:1px solid var(--border);border-radius:6px;padding:6px 10px}
+.tcard.tot{background:rgba(245,158,11,.05);border-color:rgba(245,158,11,.15)}
+.tcard .tg-val{font-size:17px}
+.tcard .ssub{margin-top:0}
 .tg-lbl{font-size:9px;color:var(--slate);letter-spacing:.06em;white-space:nowrap}
 .tg-val{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;font-family:'JetBrains Mono',monospace;color:var(--text-mid)}
-#tbar-lbl{font-size:9px;color:var(--slate);letter-spacing:.12em}
-#tbar-total{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;font-family:'JetBrains Mono',monospace}
-#gbar{flex:1;min-width:60px;height:4px;display:flex;gap:2px}
+#gbar{height:4px;display:flex;gap:2px}
 .gbseg{height:100%;border-radius:2px;transition:width .3s}
-#tbar-cnt{font-size:10px;color:var(--slate);white-space:nowrap}
 
 /* PRESET LIST */
 #preset-list{border-top:1px solid rgba(100,116,139,.07)}
@@ -373,10 +374,8 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
   <!-- TASKS -->
   <div class="view on" id="v-tasks">
     <div id="tbar">
-      <div><div id="tbar-lbl">TODAY</div><div id="tbar-total">00:00</div></div>
-      <div id="tbar-grp"></div>
+      <div id="tbar-cards"></div>
       <div id="gbar"></div>
-      <div id="tbar-cnt"></div>
     </div>
     <div class="slbl">─── タスクリスト（▶ で即スタート）───</div>
     <div id="preset-list"></div>
@@ -1033,6 +1032,13 @@ function commitActiveStart(){
   sv();
   updElapsed();renderAB();renderTbar();renderPL();
 }
+// TODAYバーの固定位置＝ヘッダー＋（計測中なら）アクティブバーの高さ
+function setTbarTop(){
+  const ab=document.getElementById('active-bar');
+  const h=ab.classList.contains('show')?parseFloat(getComputedStyle(ab).top)+ab.offsetHeight:document.getElementById('hdr').offsetHeight;
+  document.documentElement.style.setProperty('--tbar-top',h+'px');
+}
+window.addEventListener('resize',setTbarTop);
 function renderAB(){
   const bar=document.getElementById('active-bar');
   const dock=document.getElementById('stop-dock');
@@ -1040,6 +1046,7 @@ function renderAB(){
     bar.classList.remove('show');
     dock.classList.remove('show');
     document.body.classList.remove('running');
+    setTbarTop();
     return;
   }
   const g=gbi(active.genre);
@@ -1048,6 +1055,7 @@ function renderAB(){
   document.getElementById('ab-sub').innerHTML=bdg(g)+`<span style="font-size:10px;color:var(--slate);margin-left:4px">${ft(active.startDate)} 〜</span>`;
   document.getElementById('ab-elapsed').textContent=fd(elapsed);
   bar.classList.add('show');
+  setTbarTop();
   // 停止ドック
   document.getElementById('sd-name').textContent=active.name;
   document.getElementById('sd-genre').innerHTML=bdg(g);
@@ -1607,17 +1615,14 @@ function shiftLogDate(delta){
 
 // TODAY BAR
 function renderTbar(){
-  const tt=ttasks(),bar=document.getElementById('tbar');
-  if(!tt.length&&!active){bar.classList.remove('show');return;}
-  bar.classList.add('show');
+  const tt=ttasks();
   const all=[...tt,...(active?[{...active,duration:elapsed}]:[])];
   const tot=all.reduce((a,t)=>a+t.duration,0);
-  document.getElementById('tbar-total').textContent=fd(tot);
-  document.getElementById('tbar-cnt').textContent=(tt.length+(active?1:0))+' tasks';
-  const gb=document.getElementById('gbar');gb.innerHTML='';
+  // SUMMARYと同じく、今日の合計の横に大分類ごとの合計をカードで並べる（記録0件の日も0:00で出す）
+  document.getElementById('tbar-cards').innerHTML=`<div class="tcard tot"><div class="tg-lbl">TODAY</div><div class="tg-val" style="color:var(--amber)">${fd(tot)}</div><div class="ssub">${all.length} tasks</div></div>`
+    +grTotals(all).map(({gr,t})=>`<div class="tcard"${t?'':' style="opacity:.45"'}><div class="tg-lbl">${eh(gr.label)}</div><div class="tg-val" style="color:var(--text)">${fd(t)}</div><div class="ssub">${tot?Math.round(t/tot*100):0}%</div></div>`).join('');
+  const gb=document.getElementById('gbar');gb.innerHTML='';gb.style.display=tot?'flex':'none';
   const ts={};all.forEach(t=>{ts[t.genre]=(ts[t.genre]||0)+t.duration;});
-  // 大分類ごとの合計を全体の合計の横に並べる
-  document.getElementById('tbar-grp').innerHTML=grChips(all,'tg');
   groups.flatMap(gr=>genres.filter(g=>g.parent===gr.id)).forEach(g=>{if(!ts[g.id])return;const s=document.createElement('div');s.className='gbseg';s.style.cssText=`width:${(ts[g.id]/tot)*100}%;background:${g.color}`;s.title=`${g.label}: ${fd(ts[g.id])}`;gb.appendChild(s);});
 }
 
