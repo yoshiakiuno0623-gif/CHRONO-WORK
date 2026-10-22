@@ -111,7 +111,7 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
 #tbar.show{display:flex;flex-wrap:wrap}
 #tbar-grp{display:flex;gap:14px;flex-wrap:wrap;padding-left:12px;border-left:1px solid rgba(100,116,139,.2)}
 .tg-lbl{font-size:9px;color:var(--slate);letter-spacing:.06em;white-space:nowrap}
-.tg-val{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;font-family:'JetBrains Mono',monospace;color:var(--text-mid)}
+.tg-val{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;font-family:'JetBrains Mono',monospace;color:var(--text-mid)}
 #tbar-lbl{font-size:9px;color:var(--slate);letter-spacing:.12em}
 #tbar-total{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;font-family:'JetBrains Mono',monospace}
 #gbar{flex:1;min-width:60px;height:4px;display:flex;gap:2px}
@@ -491,6 +491,8 @@ input[type=date].inp{color-scheme:dark;cursor:pointer}
       <div class="scard"><div class="slbl" style="margin-bottom:4px">DAYS</div><div class="sval" id="s-time" style="color:var(--text-mid)">0</div><div class="ssub">活動日数</div></div>
       <div class="scard" style="background:rgba(16,185,129,.05);border-color:rgba(16,185,129,.18)"><div class="slbl" style="margin-bottom:4px">AVG / DAY</div><div class="sval" id="s-avg" style="color:#34D399">00:00</div><div class="ssub" id="s-avg-sub">稼働日あたり</div></div>
     </div>
+    <!-- 大分類ごとの合計 -->
+    <div id="sum-grp" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px"></div>
     <!-- BREAKDOWN -->
     <div style="background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:12px">
       <div class="slbl" id="bk-title">─── BREAKDOWN ───</div>
@@ -906,6 +908,9 @@ function sv(){
   if(SB_ENABLED&&SB_USER) sbSave().catch(e=>console.warn('sbSave fail',e));
 }
 function gbi(id){return genres.find(g=>g.id===id)||{id:"?",label:id,color:"#64748B"};}
+// 大分類ごとの合計 [{gr,t}]（並びは大分類の順）
+function grTotals(list){const ts={};list.forEach(t=>{const k=grOf(t.genre).id;ts[k]=(ts[k]||0)+t.duration;});return groups.map(gr=>({gr,t:ts[gr.id]||0}));}
+function grChips(list,cls){return grTotals(list).map(({gr,t})=>`<div class="${cls}"${t?'':' style="opacity:.4"'}><div class="tg-lbl">${eh(gr.label)}</div><div class="tg-val">${fd(t)}</div></div>`).join('');}
 function grOf(gid){const g=genres.find(x=>x.id===gid);return groups.find(x=>g&&x.id===g.parent)||{id:'?',label:'未分類'};}
 function pc(p){return gbi(p.genre).color;}
 function pad(n){return String(n).padStart(2,'0');}
@@ -1292,7 +1297,7 @@ function renderLog(){
     const d=new Date(logDate);
     const dlbl=d.toLocaleDateString('ja-JP',{month:'long',day:'numeric',weekday:'short'});
     dsEl.style.display='flex';
-    dsEl.innerHTML=`<span style="font-size:11px;color:var(--slate)">${dlbl}</span><span class="lds-total">${fd(tot)}</span><span class="lds-cnt">${tt.length} tasks</span>`;
+    dsEl.innerHTML=`<span style="font-size:11px;color:var(--slate)">${dlbl}</span><span class="lds-total">${fd(tot)}</span><span id="lds-grp" style="display:flex;gap:14px;flex-wrap:wrap;padding-left:12px;border-left:1px solid rgba(245,158,11,.2)">${grChips(tt,'tg')}</span><span class="lds-cnt">${tt.length} tasks</span>`;
   } else {
     dsEl.style.display='none';
   }
@@ -1612,10 +1617,7 @@ function renderTbar(){
   const gb=document.getElementById('gbar');gb.innerHTML='';
   const ts={};all.forEach(t=>{ts[t.genre]=(ts[t.genre]||0)+t.duration;});
   // 大分類ごとの合計を全体の合計の横に並べる
-  document.getElementById('tbar-grp').innerHTML=groups.map(gr=>{
-    const v=genres.filter(g=>g.parent===gr.id).reduce((a,g)=>a+(ts[g.id]||0),0);
-    return`<div><div class="tg-lbl">${eh(gr.label)}</div><div class="tg-val"${v?'':' style="opacity:.4"'}>${fd(v)}</div></div>`;
-  }).join('');
+  document.getElementById('tbar-grp').innerHTML=grChips(all,'tg');
   groups.flatMap(gr=>genres.filter(g=>g.parent===gr.id)).forEach(g=>{if(!ts[g.id])return;const s=document.createElement('div');s.className='gbseg';s.style.cssText=`width:${(ts[g.id]/tot)*100}%;background:${g.color}`;s.title=`${g.label}: ${fd(ts[g.id])}`;gb.appendChild(s);});
 }
 
@@ -1683,6 +1685,7 @@ function renderSum(){
   else{rl.textContent=from+' 〜 '+to+' （'+rangeTasks.filter(t=>t.id).length+' tasks・'+activeDays+' days）';}
   // KPI
   document.getElementById('s-today').textContent=fd(tot);
+  document.getElementById('sum-grp').innerHTML=grTotals(rangeTasks).map(({gr,t})=>`<div class="scard"${t?'':' style="opacity:.45"'}><div class="slbl" style="margin-bottom:4px">${eh(gr.label)}</div><div class="sval" style="color:var(--text)">${fd(t)}</div><div class="ssub">${tot?Math.round(t/tot*100):0}%</div></div>`).join('');
   document.getElementById('s-today-sub').textContent=rangeTasks.filter(t=>t.id).length+(incActive?1:0)+' tasks';
   document.getElementById('s-tasks').textContent=rangeTasks.filter(t=>t.id).length+(incActive?1:0);
   document.getElementById('s-tasks-sub').textContent='件';
